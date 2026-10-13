@@ -158,7 +158,7 @@ static int wifi_event(struct notifier_block *notifier, unsigned long event, void
 
 	if (!netdev->ieee80211_ptr || netdev->ieee80211_ptr->iftype != NL80211_IFTYPE_AP)
 		return NOTIFY_DONE;
-	if (event == NETDEV_UP) {
+	if (event == NETDEV_REGISTER || event == NETDEV_UP) {
 		ret = wifi_add(netdev);
 		if (ret) netdev_err(netdev, "native NE Wi-Fi registration failed: %d\n", ret);
 	} else if (event == NETDEV_DOWN || event == NETDEV_UNREGISTER) {
@@ -168,7 +168,8 @@ static int wifi_event(struct notifier_block *notifier, unsigned long event, void
 	}
 	return NOTIFY_DONE;
 }
-static struct notifier_block wifi_notifier = {.notifier_call = wifi_event};
+/* Publish the FE identity before nftables binds a recreated AP. */
+static struct notifier_block wifi_notifier = {.notifier_call = wifi_event, .priority = 1};
 
 int rtl_wifi_start(struct device *ni)
 {
