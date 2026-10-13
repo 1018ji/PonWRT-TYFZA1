@@ -27,7 +27,7 @@ pe_entry:
     nop
     nop
     nop
-    # The 77C startup uses CP3 registers0/1 for its64KiB instruction window.
+    # CP3 windows take physical addresses; code executes at the cached alias.
     mfc0 $t0, $12
     lui $t1, 0x8000
     or $t0, $t0, $t1
@@ -38,13 +38,16 @@ pe_entry:
     nop
     nop
     nop
-    lui $t0, 0x9fc0
+    lui $t0, 0x1fc0
     .word 0x4c880000 # mtc3 t0,register0: instruction start
-    ori $t0, $t0, 0xffff
+    ori $t0, $t0, 0x3fff
     .word 0x4c880800 # mtc3 t0,register1: instruction end
-    # CP3 DMEM holds the private stack; shared mailboxes stay in DDR.
+    # DMEM holds the private stack; shared mailboxes stay in DDR.
     srl $t0, $sp, 16
     sll $t0, $t0, 16
+    lui $t1, 0x1fff
+    ori $t1, $t1, 0xffff
+    and $t0, $t0, $t1
     ori $t0, $t0, 0x8000
     .word 0x4c882000 # mtc3 t0,register4: data start
     ori $t0, $t0, 0x7fff
@@ -53,7 +56,7 @@ pe_entry:
     li $t1, -97
     and $t0, $t0, $t1
     mtc0 $t0, $20
-    ori $t0, $t0, 0x440
+    ori $t0, $t0, 0x444
     mtc0 $t0, $20
     nop
     nop
@@ -64,6 +67,18 @@ pe_entry:
     mfc0 $t0, $20
     sw $t0, 216($a0)
     sw $sp, 244($a0)
+    # Populate IRAM through its cached load/store aperture.
+    lui $t0, 0x9fc0
+    addiu $t1, $a0, -0x2000
+    addiu $t2, $t1, 0x4000
+iram_copy:
+    lw $t3, 0($t1)
+    sw $t3, 0($t0)
+    addiu $t1, $t1, 4
+    addiu $t0, $t0, 4
+    bne $t1, $t2, iram_copy
+    nop
+    sync
     # Both aliases use ATU entry0; shared data remains in uncached DDR.
     lui $t9, 0x9fc0
     ori $t9, $t9, 0x0400
