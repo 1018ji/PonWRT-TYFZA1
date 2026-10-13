@@ -68,6 +68,7 @@ struct rtl_ax_rx {
 	u64 pe_rx_delivered, pe_rx_malformed;
 	u64 pe_rx_data, pe_rx_data_bytes, pe_rx_pm_data;
 	struct ieee80211_key_conf *keys[128];
+	u8 uplink_trigger_tids[128];
 	struct mutex uplink_lock;
 	struct ieee80211_hw *hw;
 	unsigned int uplink_wifi_id;
@@ -76,6 +77,24 @@ struct rtl_ax_rx {
 	struct rtl_ax_shortcut_seen uplink_seen[128][16];
 	u32 halt_error;
 };
+
+void rtl_ax_rx_uapsd(struct rtl_ax_rx *rx, unsigned int macid, u8 queues)
+{
+	static const u8 queue_mask[8] = {8, 4, 4, 8, 2, 2, 1, 1};
+	u8 tids = 0;
+	u32 value;
+
+	/* WMM AC flags use VO/VI/BK/BE order; the PE consumes a TID bitmap. */
+	for (unsigned int tid = 0; tid < 8; tid++)
+		if (queues & queue_mask[tid]) tids |= BIT(tid);
+	mutex_lock(&rx->uplink_lock);
+	rx->uplink_trigger_tids[macid] = tids;
+	value = get_unaligned_le32(rx->uplink_states + 0x10000 + macid * 4);
+	put_unaligned_le32((value & ~GENMASK(23, 16)) | (u32)tids << 16,
+		rx->uplink_states + 0x10000 + macid * 4);
+	dma_wmb();
+	mutex_unlock(&rx->uplink_lock);
+}
 
 void rtl_ax_rx_key(struct rtl_ax_rx *rx, unsigned int macid, struct ieee80211_key_conf *key)
 {
@@ -102,7 +121,8 @@ void rtl_ax_rx_uplink_enable(struct rtl_ax_rx *rx, unsigned int macid)
 	mutex_lock(&rx->uplink_lock);
 	if (rx->keys[macid] && rx->uplink_wifi_id) {
 		dma_wmb();
-		put_unaligned_le32(BIT(31) | rx->uplink_wifi_id << 8 | rx->keys[macid]->keyidx,
+		put_unaligned_le32(BIT(31) | rx->uplink_wifi_id << 8 | rx->keys[macid]->keyidx |
+			(u32)rx->uplink_trigger_tids[macid] << 16,
 			rx->uplink_states + 0x10000 + macid * 4);
 	}
 	mutex_unlock(&rx->uplink_lock);
@@ -124,7 +144,8 @@ void rtl_ax_rx_uplink_peer(struct rtl_ax_rx *rx, unsigned int wifi_id, struct ie
 	for (macid = 1; macid < 128; macid++) {
 		struct ieee80211_key_conf *key = rx->keys[macid];
 		if (key && get_unaligned_le32(rx->rpq_memory + 0x11a00 + macid * 4))
-			put_unaligned_le32(BIT(31) | wifi_id << 8 | key->keyidx,
+			put_unaligned_le32(BIT(31) | wifi_id << 8 | key->keyidx |
+			(u32)rx->uplink_trigger_tids[macid] << 16,
 			rx->uplink_states + 0x10000 + macid * 4);
 	}
 	dma_wmb();

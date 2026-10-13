@@ -495,6 +495,7 @@ static int rtl_ax_station_add(struct ieee80211_hw *hw, struct ieee80211_vif *vif
 	if (ret)
 		goto remove;
 	rtl_ax_tx_peer_qos(radio->tx, id, sta->wme);
+	rtl_ax_rx_uapsd(radio->rx, id, sta->uapsd_queues);
 	if (radio->chip == RTL_AX_8852C && sta->deflink.vht_cap.vht_supported) {
 		u16 ht = sta->deflink.ht_cap.mcs.rx_mask[0] | sta->deflink.ht_cap.mcs.rx_mask[1] << 8;
 		bool sgi = sta->deflink.vht_cap.cap & IEEE80211_VHT_CAP_SHORT_GI_80;

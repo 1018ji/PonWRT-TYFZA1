@@ -85,8 +85,11 @@ static u32 rx_frame(volatile u32 *mailbox, u8 *buffer, u8 **frame, u32 *length, 
 	for (u32 i = 0; i < 6; i++) if (data[4 + i] != ap[i] || data[10 + i] != peer[i]) return 0;
 	u32 header = fc & 0x80 ? 26 : 24;
 	if (fc & 0x8000) header += 4;
-	/* Sleeping QoS DATA can trigger a U-APSD service period in mac80211. */
-	if ((fc & BIT(12)) || *(u32 *)(memory + 0xe800 + macid * 16)) {
+	/* mac80211 handles PS transitions and trigger-enabled U-APSD frames. */
+	u32 sleeping = !!(fc & BIT(12));
+	u32 old_sleeping = !!*(u32 *)(memory + 0xe800 + macid * 16);
+	u32 trigger_tids = (config >> 16) & 255;
+	if (sleeping != old_sleeping || (sleeping && (trigger_tids & BIT(data[24] & 15)))) {
 		mailbox[121]++;
 		return 0;
 	}
