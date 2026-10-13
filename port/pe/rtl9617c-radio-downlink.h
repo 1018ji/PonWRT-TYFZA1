@@ -25,14 +25,16 @@ static u32 __attribute__((section(".rxq"), noinline)) ni_ingest(volatile u32 *ma
 	volatile u32 *ni = (void *)0xb0000000;
 	volatile u32 *owners = (void *)(memory + 0xc400);
 	if (mailbox[30] >= 124 || mailbox[47]) return 0;
-	u32 cos = 8, consumer = 0;
+	/* Stock NIC selects the highest COS from EPP_STATUS0, then checks WTP. */
+	u32 available = (ni[0x659c / 4] >> ((mailbox[114] - 0x7000) / 4)) & 255;
+	if (!available) return 0;
+	u32 cos = 0;
+	if (available & 0xf0) { available >>= 4; cos = 4; }
+	if (available & 0x0c) { available >>= 2; cos += 2; }
+	if (available & 0x02) cos++;
 	volatile u32 *consumers = (void *)(memory + NI_EPP_CONSUMERS);
-	for (u32 n = 8; n; n--) {
-		u32 candidate = n - 1;
-		consumer = consumers[candidate];
-		if ((ni[mailbox[114] / 4 + candidate] & (NI_EPP_BYTES - 1)) != consumer) { cos = candidate; break; }
-	}
-	if (cos == 8) return 0;
+	u32 consumer = consumers[cos];
+	if ((ni[mailbox[114] / 4 + cos] & (NI_EPP_BYTES - 1)) == consumer) return 0;
 	sync();
 	const u32 *entry = uncached(mailbox[25] + cos * NI_EPP_BYTES + consumer);
 	if ((*(volatile u32 *)entry & 0x50) != 0x50) return 0;

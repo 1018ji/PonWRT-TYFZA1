@@ -176,7 +176,7 @@ static int pe_probe_start(struct pe_probe *pe, const u32 *program, unsigned int 
   address = (u32)(pe_engine->dma + PE_PROBE_MAILBOX) | 0xa0000000U;
   put_unaligned_le32(program[0] | address >> 16, pe_engine->memory);
   put_unaligned_le32(program[1] | (address & 0xffff), pe_engine->memory + 4);
-  put_unaligned_le32(program[2] | ((u32)pe_engine->dma | 0xa0000000U) >> 16, pe_engine->memory + 8);
+  put_unaligned_le32(program[2] | ((u32)pe_engine->dma | 0x80000000U) >> 16, pe_engine->memory + 8);
   put_unaligned_le32(program[0x380 / 4] | address >> 16, pe_engine->memory + 0x380);
   put_unaligned_le32(program[0x384 / 4] | (address & 0xffff), pe_engine->memory + 0x384);
   dma_wmb();
