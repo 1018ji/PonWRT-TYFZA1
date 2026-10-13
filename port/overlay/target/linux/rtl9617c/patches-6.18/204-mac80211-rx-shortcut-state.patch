@@ -1,6 +1,23 @@
 --- a/net/mac80211/rx.c
 +++ b/net/mac80211/rx.c
-@@ -4363,6 +4363,78 @@
+@@ -4128,6 +4128,16 @@
+ 		CALL_RXH(ieee80211_rx_h_uapsd_and_pspoll);
+ 		CALL_RXH(ieee80211_rx_h_sta_process);
+ 		CALL_RXH(ieee80211_rx_h_decrypt);
++		if (rx->sta && rx->key && rx->key->conf.cipher == WLAN_CIPHER_SUITE_CCMP) {
++			struct ieee80211_hdr *accepted = (void *)rx->skb->data;
++			if (ieee80211_is_data_qos(accepted->frame_control) &&
++			    !ieee80211_has_morefrags(accepted->frame_control) &&
++			    !(accepted->seq_ctrl & cpu_to_le16(IEEE80211_SCTL_FRAG))) {
++				rx->sta->rx_shortcut_next_seq[rx->security_idx] =
++					((le16_to_cpu(accepted->seq_ctrl) >> 4) + 1) & 4095;
++				rx->sta->rx_shortcut_key[rx->security_idx] = rx->key;
++			}
++		}
+ 		CALL_RXH(ieee80211_rx_h_defragment);
+ 		CALL_RXH(ieee80211_rx_h_michael_mic_verify);
+ 		/* must be after MMIC verify so header is counted in MPDU mic */
+@@ -4363,6 +4373,82 @@
  	rcu_read_unlock();
  }
  EXPORT_SYMBOL(ieee80211_mark_rx_ba_filtered_frames);
@@ -17,16 +34,18 @@
 +
 +	spin_lock_bh(&local->rx_path_lock);
 +	if (keyconf->cipher != WLAN_CIPHER_SUITE_CCMP || key->sta != sta ||
-+	    !test_sta_flag(sta, WLAN_STA_AUTHORIZED))
++	    !test_sta_flag(sta, WLAN_STA_AUTHORIZED) ||
++	    sta->rx_shortcut_key[tid] != key)
 +		goto out;
 +	ba = rcu_dereference(sta->ampdu_mlme.tid_rx[tid]);
 +	if (ba) {
 +		spin_lock_bh(&ba->reorder_lock);
-+		ready = !ba->stored_mpdu_num;
++		ready = !ba->stored_mpdu_num &&
++			ba->head_seq_num == sta->rx_shortcut_next_seq[tid];
 +		if (ready) *next_seq = ba->head_seq_num;
 +		spin_unlock_bh(&ba->reorder_lock);
 +	} else {
-+		*next_seq = ((le16_to_cpu(sta->last_seq_ctrl[tid]) >> 4) + 1) & 4095;
++		*next_seq = sta->rx_shortcut_next_seq[tid];
 +		ready = true;
 +	}
 +	if (ready) memcpy(pn, key->u.ccmp.rx_pn[tid], 6);
@@ -49,6 +68,8 @@
 +		if (memcmp(pn, key->u.ccmp.rx_pn[tid], 6) > 0)
 +			memcpy(key->u.ccmp.rx_pn[tid], pn, 6);
 +		sta->last_seq_ctrl[tid] = cpu_to_le16(((next_seq - 1) & 4095) << 4);
++		sta->rx_shortcut_next_seq[tid] = next_seq;
++		sta->rx_shortcut_key[tid] = key;
 +	}
 +	spin_unlock_bh(&local->rx_path_lock);
 +	ieee80211_mark_rx_ba_filtered_frames(pubsta, tid, next_seq, 0, received);
@@ -78,6 +99,17 @@
 +EXPORT_SYMBOL_GPL(ieee80211_rx_shortcut_account);
  
  /* main receive path */
+ 
+--- a/net/mac80211/sta_info.h
++++ b/net/mac80211/sta_info.h
+@@ -746,6 +746,8 @@
+ 
+ 	/* Plus 1 for non-QoS frames */
+ 	__le16 last_seq_ctrl[IEEE80211_NUM_TIDS + 1];
++	u16 rx_shortcut_next_seq[IEEE80211_NUM_TIDS];
++	struct ieee80211_key *rx_shortcut_key[IEEE80211_NUM_TIDS];
+ 
+ 	u16 tid_seq[IEEE80211_QOS_CTL_TID_MASK + 1];
  
 --- a/include/net/mac80211.h
 +++ b/include/net/mac80211.h
