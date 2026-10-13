@@ -150,14 +150,15 @@ static u32 __attribute__((section(".rxq"), noinline)) rx_uplink(volatile u32 *ma
 		if (amsdu) {
 			u8 *sub = data + offset;
 			u32 payload = (u32)sub[12] << 8 | sub[13];
-			for (u32 i = 0; i < 12; i++) addresses[i] = sub[i];
+			header_copy(addresses, sub, 12);
 			ethernet = sub + 8; bytes = payload + 6;
 			offset = (offset + payload + 17) & ~3U;
 		} else {
-			for (u32 i = 0; i < 6; i++) { addresses[i] = frame[16 + i]; addresses[6 + i] = frame[10 + i]; }
+			header_copy(addresses, frame + 16, 6);
+			header_copy(addresses + 6, frame + 10, 6);
 			ethernet = data - 6; bytes = body + 6;
 		}
-		for (u32 i = 0; i < 12; i++) ethernet[i] = addresses[i];
+		header_copy(ethernet, addresses, 12);
 		if (bytes < 60) { for (u32 i = bytes; i < 60; i++) ethernet[i] = 0; bytes = 60; }
 		u32 *descriptor = uncached(mailbox[89] + ((write + n) & 63) * 8);
 		descriptor[0] = buffer_dma + (u32)(ethernet - buffer);

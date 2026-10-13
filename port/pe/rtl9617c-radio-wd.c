@@ -250,7 +250,12 @@ void pe_main(volatile u32 *control)
 		pe_event_flush(mailbox);
 		if (!(command & 1)) continue;
 		pe_rpq(mailbox, memory);
-		pe_rxq(mailbox);
+		/* Drain a short RX burst before servicing downlink and RPQ again. */
+		for (u32 budget = 0; budget < 4; budget++) {
+			u32 before = mailbox[81];
+			pe_rxq(mailbox);
+			if (mailbox[81] == before || mailbox[94] != mailbox[95]) break;
+		}
 		if (mailbox[30]) ni_recycle(mailbox, memory);
 		if (mailbox[78] && !mailbox[30]) { mailbox[78] = 0; pe_event(mailbox); }
 		sync();
