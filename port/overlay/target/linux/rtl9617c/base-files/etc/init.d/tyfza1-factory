@@ -1,0 +1,24 @@
+#!/bin/sh /etc/rc.common
+# SPDX-License-Identifier: GPL-2.0-only
+# Populate per-unit firmware before boot's kmodloader probes the radios.
+START=09
+
+boot() {
+	local source=/tmp/tyfza1-factory-source
+	local device
+	[ -e /sys/bus/platform/devices/4f5500000.pon/serdes ] || return 0
+	if [ ! -d /sys/class/ubi/ubi0 ]; then
+		for device in /sys/class/mtd/mtd*/name; do
+			[ "$(cat "$device")" = ubi_device ] || continue
+			device=${device%/name}
+			ubiattach /dev/ubi_ctrl -m "${device##*mtd}" || return $?
+			break
+		done
+	fi
+	mkdir -p "$source"
+	mount -t ubifs -o ro ubi0:ubi_Config "$source" || return $?
+	/usr/share/tyfza1/factory.uc "$source" /
+	local result=$?
+	umount "$source"
+	return "$result"
+}

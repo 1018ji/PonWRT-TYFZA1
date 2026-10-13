@@ -1,0 +1,14 @@
+{
+  "admin/status/tyfza1": {
+    "title": "设备总览",
+    "order": 0,
+    "action": {"type": "view", "path": "status/tyfza1"},
+    "depends": {"acl": ["luci-app-tyfza1-pon"]}
+  },
+  "admin/network/pon": {
+    "title": "PON 管理",
+    "order": 25,
+    "action": {"type": "view", "path": "network/tyfza1-pon"},
+    "depends": {"acl": ["luci-app-tyfza1-pon"], "uci": {"pon": true}}
+  }
+}

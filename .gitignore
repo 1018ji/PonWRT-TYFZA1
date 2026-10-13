@@ -1,0 +1,14 @@
+evidence/
+artifacts/
+logs/
+docs/
+**/README*
+!/README.md
+analysis/
+__pycache__/
+*.pyc
+.venv/
+analysis/python-deps/
+analysis/radio-stock-power/
+analysis/radio-stock-download/
+analysis/radio-stock-lifecycle/
