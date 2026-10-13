@@ -238,6 +238,9 @@ static bool rtl_ax_rx_drain(struct rtl_ax_rx *rx, unsigned int number)
 			return false;
 		}
 		buffer = queue->buffers + rtl_ax_rx_buffer_offset(queue, queue->consumer);
+		/* RX crosses the noncoherent PE domain as well as PCIe. */
+		dma_sync_single_for_cpu(rx->pe_device, queue->buffer_dma + (buffer - queue->buffers),
+			queue->buffer_bytes, DMA_BIDIRECTIONAL);
 		/* The actual board function polls10000 coherent tag observations,
 		 * wraps8191→1 and changes its saved tag only after a match. */
 		for (attempt = 0; attempt < 10000; attempt++) {
@@ -320,6 +323,8 @@ data_observed:
 		rtl_ax_rxbd(queue->descriptors + queue->consumer * 8,
 			    lower_32_bits(queue->buffer_dma + (buffer - queue->buffers)),
 			    queue->buffer_bytes);
+		dma_sync_single_for_device(rx->pe_device, queue->buffer_dma + (buffer - queue->buffers),
+			queue->buffer_bytes, DMA_BIDIRECTIONAL);
 		dma_wmb();
 		queue->consumer = (queue->consumer + 1) % RTL_AX_RX_ENTRIES;
 		io->write16(io->ctx, index, queue->consumer);
@@ -731,6 +736,9 @@ struct rtl_ax_rx *rtl_ax_rx_prepare(struct pci_dev *pdev, const struct rtl_ax_io
 			goto free;
 		}
 		memset(queue->buffers, 0, (RTL_AX_RX_ENTRIES + (number ? 0 : RTL_AX_RX_SPARES)) * queue->buffer_bytes);
+		dma_sync_single_for_device(rx->pe_device, queue->buffer_dma,
+			(RTL_AX_RX_ENTRIES + (number ? 0 : RTL_AX_RX_SPARES)) * queue->buffer_bytes,
+			DMA_BIDIRECTIONAL);
 		for (entry = 0; entry < RTL_AX_RX_ENTRIES; entry++)
 			rtl_ax_rxbd(queue->descriptors + entry * 8,
 				    lower_32_bits(queue->buffer_dma + entry * queue->buffer_bytes),

@@ -721,14 +721,6 @@ static int rtl_ax_mac_features(struct rtl_ax_ap *radio)
 
 	/* mac_feat_init→mac_bacam_init_upd(8,0,0): MAC/class12/function2,
 	 * CMD buffer,4-byte payload and done-ACK requested. */
-	radio->rx = rtl_ax_rx_prepare(radio->pdev, &radio->io, rtl_ax_receive, radio,
-		rtl_ax_tx_dma_device(radio->tx));
-	if (IS_ERR(radio->rx)) {
-		ret = PTR_ERR(radio->rx);
-		radio->rx = NULL;
-		return ret;
-	}
-	rtl_ax_tx_bind_rx(radio->tx, radio->rx);
 	pci_set_master(radio->pdev);
 	rtl_ax_h2c_start(&radio->io);
 	rtl_ax_rx_open(radio->rx);
@@ -887,9 +879,11 @@ static void rtl_ax_ring_free(struct rtl_ax_ap *radio)
 
 static int rtl_ax_ring_prepare(struct rtl_ax_ap *radio)
 {
+	int ret;
+
 	radio->tx = rtl_ax_tx_prepare(radio->pdev, &radio->io);
 	if (IS_ERR(radio->tx)) {
-		int ret = PTR_ERR(radio->tx);
+		ret = PTR_ERR(radio->tx);
 
 		radio->tx = NULL;
 		return ret;
@@ -903,7 +897,19 @@ static int rtl_ax_ring_prepare(struct rtl_ax_ap *radio)
 	if (!radio->h2c_packet)
 		return -ENOMEM;
 	memset(radio->h2c_ring, 0, RTL_AX_H2C_ENTRIES * 8);
-	return rtl_ax_h2c_ring_configure(&radio->io, lower_32_bits(radio->h2c_ring_dma));
+	ret = rtl_ax_h2c_ring_configure(&radio->io, lower_32_bits(radio->h2c_ring_dma));
+	if (ret)
+		return ret;
+	/* Prepare RX resources before firmware download, as in MAC pre-init. */
+	radio->rx = rtl_ax_rx_prepare(radio->pdev, &radio->io, rtl_ax_receive, radio,
+		rtl_ax_tx_dma_device(radio->tx));
+	if (IS_ERR(radio->rx)) {
+		ret = PTR_ERR(radio->rx);
+		radio->rx = NULL;
+		return ret;
+	}
+	rtl_ax_tx_bind_rx(radio->tx, radio->rx);
+	return 0;
 }
 
 static int rtl_ax_load_firmware(struct rtl_ax_ap *radio, const struct firmware *fw)

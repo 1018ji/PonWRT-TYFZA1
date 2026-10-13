@@ -882,12 +882,32 @@ int rtl_fe_setup_tc(struct rtl_fe *fe,struct net_device *netdev,enum tc_setup_ty
  if(!port && block->command==FLOW_BLOCK_UNBIND)
   list_for_each_entry(candidate,&fe->ports,list)
    if(candidate->retired && candidate->netdev==netdev){port=candidate;break;}
- ret=port?flow_block_cb_setup_simple(block,&fe->blocks,fe_block_callback,port,port,true):-ENODEV;
- if(!ret && block->command==FLOW_BLOCK_BIND) {
-  callback=list_last_entry(&block->cb_list,struct flow_block_cb,list);
-  callback->release=fe_block_release;
+ if(!port){ret=-ENODEV;goto unlock;}
+ block->driver_block_list=&fe->blocks;
+ callback=flow_block_cb_lookup(block->block,fe_block_callback,port);
+ switch(block->command) {
+ case FLOW_BLOCK_BIND:
+  /* fw4 probes a second flowtable while the active one remains bound. */
+  if(callback){flow_block_cb_incref(callback);ret=0;break;}
+  callback=flow_block_cb_alloc(fe_block_callback,port,port,fe_block_release);
+  if(IS_ERR(callback)){ret=PTR_ERR(callback);break;}
+  flow_block_cb_incref(callback);
+  flow_block_cb_add(callback,block);
+  list_add_tail(&callback->driver_list,&fe->blocks);
   port->bindings++;
+  ret=0;
+  break;
+ case FLOW_BLOCK_UNBIND:
+  if(!callback){ret=-ENOENT;break;}
+  if(!flow_block_cb_decref(callback)) {
+   flow_block_cb_remove(callback,block);
+   list_del(&callback->driver_list);
+  }
+  ret=0;
+  break;
+ default:ret=-EOPNOTSUPP;break;
  }
+unlock:
  mutex_unlock(&fe->lock);
  return ret;
 }

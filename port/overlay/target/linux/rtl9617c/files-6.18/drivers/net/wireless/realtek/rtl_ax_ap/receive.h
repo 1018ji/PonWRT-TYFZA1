@@ -108,6 +108,9 @@ static inline int rtl_ax_rx_configure(const struct rtl_ax_io *io,
 		io->write32(io->ctx, 0x1220 + queue * 8, addresses[queue]);
 		io->write32(io->ctx, 0x1224 + queue * 8, 0);
 	}
-	return 0;
+	/* Commit the complete ring geometry before enabling firmware DMA. */
+	rtl_ax_update32(io, RTL_AX_HAXI_CONFIG, 0, RTL_AX_BIT(3));
+	return io->poll32(io->ctx, RTL_AX_HAXI_CONFIG, RTL_AX_BIT(3), 0,
+		50, 500000, &last);
 }
 #endif
