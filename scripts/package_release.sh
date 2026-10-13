@@ -24,7 +24,7 @@ STRIP=${CC%gcc}strip
 export STAGING_DIR=$TREE/staging_dir/target-aarch64_cortex-a55_musl
 make -C "$SOURCE" tools-only_defconfig
 make -C "$SOURCE" -j2 envtools CC="$CC" STRIP="$STRIP" \
-    KBUILD_HOSTCFLAGS="-Os -mcpu=cortex-a55" KBUILD_HOSTLDFLAGS=-static
+    KBUILD_HOSTCFLAGS=-Os KBUILD_HOSTLDFLAGS=-static
 cp "$SOURCE/tools/env/fw_printenv" "$OUT/fw_printenv"
 "$STRIP" "$OUT/fw_printenv"
 cp "$OUT/fw_printenv" "$OUT/fw_setenv"
