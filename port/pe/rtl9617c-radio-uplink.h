@@ -72,9 +72,7 @@ static u32 rx_frame(volatile u32 *mailbox, u8 *buffer, u8 **frame, u32 *length, 
 	else for (u32 id = 1; id < 128; id++) {
 		if (!(*(u32 *)(states + RX_PEER_CONFIG + id * 4) & BIT(31))) continue;
 		u8 *address = memory + 0xe400 + id * 8;
-		u32 i;
-		for (i = 0; i < 6 && data[10 + i] == address[i]; i++);
-		if (i == 6) { macid = id; break; }
+		if (mac_equal(data + 10, address)) { macid = id; break; }
 	}
 	if (macid >= 128) return 0;
 	if (!*(volatile u32 *)(memory + 0x11a00 + macid * 4)) return 0;
@@ -82,7 +80,7 @@ static u32 rx_frame(volatile u32 *mailbox, u8 *buffer, u8 **frame, u32 *length, 
 	if (!(config & BIT(31))) return 0;
 	u8 *peer = memory + 0xe400 + macid * 8;
 	u8 *ap = (void *)(mailbox + 16);
-	for (u32 i = 0; i < 6; i++) if (data[4 + i] != ap[i] || data[10 + i] != peer[i]) return 0;
+	if (!mac_equal(data + 4, ap) || !mac_equal(data + 10, peer)) return 0;
 	u32 header = fc & 0x80 ? 26 : 24;
 	if (fc & 0x8000) header += 4;
 	/* mac80211 handles PS transitions and trigger-enabled U-APSD frames. */
@@ -135,7 +133,7 @@ static u32 __attribute__((section(".rxq"), noinline)) rx_uplink(volatile u32 *ma
 			u8 *sub = data + offset;
 			u32 bytes = (u32)sub[12] << 8 | sub[13];
 			if (bytes < 54 || bytes + 6 > 2048 || bytes > body - offset - 14 || (sub[0] & 1) || !rx_protocol(sub + 14)) return 0;
-			for (u32 i = 0; i < 6; i++) if (sub[6 + i] != frame[10 + i]) return 0;
+			if (!mac_equal(sub + 6, frame + 10)) return 0;
 			frames++;
 			offset += bytes + 14;
 			if (offset != body) offset = (offset + 3) & ~3U;

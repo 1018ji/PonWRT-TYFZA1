@@ -20,6 +20,12 @@ static void unaligned_word(u8 *out, u32 value)
 	((struct packed_word *)out)->value = value;
 }
 
+static u32 mac_equal(const u8 *a, const u8 *b)
+{
+	return ((const struct packed_word *)a)->value == ((const struct packed_word *)b)->value &&
+		a[4] == b[4] && a[5] == b[5];
+}
+
 static void address(u8 *out, u32 dma, u32 bytes, u32 last)
 {
 	out[0] = bytes;
@@ -251,7 +257,7 @@ void pe_main(volatile u32 *control)
 		if (!(command & 1)) continue;
 		pe_rpq(mailbox, memory);
 		/* Drain a short RX burst before servicing downlink and RPQ again. */
-		for (u32 budget = 0; budget < 4; budget++) {
+		for (u32 budget = 0; budget < 16; budget++) {
 			u32 before = mailbox[81];
 			pe_rxq(mailbox);
 			if (mailbox[81] == before || mailbox[94] != mailbox[95]) break;

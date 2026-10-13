@@ -69,6 +69,7 @@ struct rtl_ax_rx {
 	u64 pe_rx_data, pe_rx_data_bytes, pe_rx_pm_data;
 	struct ieee80211_key_conf *keys[128];
 	u8 uplink_trigger_tids[128];
+	u16 uplink_pending_tids[128];
 	struct mutex uplink_lock;
 	struct ieee80211_hw *hw;
 	unsigned int uplink_wifi_id;
@@ -103,6 +104,7 @@ void rtl_ax_rx_key(struct rtl_ax_rx *rx, unsigned int macid, struct ieee80211_ke
 	put_unaligned_le32(0, states + 0x10000 + macid * 4);
 	dma_wmb();
 	rx->keys[macid] = key;
+	rx->uplink_pending_tids[macid] = 0;
 	if (!key) goto unlock;
 	memset(states + macid * 512, 0, 512);
 	memset(rx->uplink_seen[macid], 0, sizeof(rx->uplink_seen[macid]));
@@ -152,6 +154,22 @@ void rtl_ax_rx_uplink_peer(struct rtl_ax_rx *rx, unsigned int wifi_id, struct ie
 	put_unaligned_le32(rx->uplink_states_dma, rx->rpq_memory + 0x21a8);
 }
 
+static bool rtl_ax_rx_uplink_publish(struct rtl_ax_rx *rx, struct ieee80211_sta *sta,
+	struct ieee80211_key_conf *key, unsigned int macid, unsigned int tid)
+{
+	u8 *state = rx->uplink_states + (macid * 16 + tid) * 32;
+	u16 next;
+	u8 pn[6];
+
+	if (!ieee80211_rx_shortcut_snapshot(sta, key, tid, &next, pn)) return false;
+	put_unaligned_le32((u32)pn[2] << 24 | (u32)pn[3] << 16 | (u32)pn[4] << 8 | pn[5], state + 4);
+	put_unaligned_le32((u32)pn[0] << 8 | pn[1], state + 8);
+	dma_wmb();
+	put_unaligned_le32(BIT(31) | next, state);
+	rx->uplink_pending_tids[macid] &= ~BIT(tid);
+	return true;
+}
+
 static void rtl_ax_rx_uplink_sync(struct rtl_ax_rx *rx)
 {
 	u8 *memory = rx->rpq_memory;
@@ -177,12 +195,17 @@ static void rtl_ax_rx_uplink_sync(struct rtl_ax_rx *rx)
 				dma_rmb();
 			} while ((guard & 1) || guard != get_unaligned_le32(state + 24));
 			count = snapshot[3] - seen->frames;
-			if (!count) continue;
+			if (!count) goto resume;
 			pn[0] = snapshot[2] >> 8; pn[1] = snapshot[2]; pn[2] = snapshot[1] >> 24;
 			pn[3] = snapshot[1] >> 16; pn[4] = snapshot[1] >> 8; pn[5] = snapshot[1];
 			ieee80211_rx_shortcut_sync(sta, key, tid, snapshot[0] & 4095, pn, min_t(u32, count, 2048));
 			ieee80211_rx_shortcut_account(sta, tid, count, snapshot[5] - seen->msdus, snapshot[4] - seen->bytes);
 			seen->frames = snapshot[3]; seen->bytes = snapshot[4]; seen->msdus = snapshot[5];
+resume:
+			/* A reorder timeout can finish after the last DMA frame callback. */
+			if ((rx->uplink_pending_tids[macid] & BIT(tid)) &&
+			    (get_unaligned_le32(rx->uplink_states + 0x10000 + macid * 4) & BIT(31)))
+				rtl_ax_rx_uplink_publish(rx, sta, key, macid, tid);
 		}
 	}
 	rcu_read_unlock(); local_bh_enable();
@@ -201,36 +224,23 @@ static void rtl_ax_rx_uplink_seed(struct rtl_ax_rx *rx, const struct rtl_ax_rx_p
 {
 	u8 *memory = rx->rpq_memory;
 	const u8 *frame = packet->payload;
-	struct ieee80211_key_conf *key;
 	struct ieee80211_sta *sta;
-	u16 fc, sequence;
-	u32 header, tid, low, high, macid;
-	u8 pn[6], *state;
+	unsigned int macid, tid;
+	u16 fc;
 
 	if (!rx->uplink_wifi_id || packet->type || packet->bytes < 54) return;
 	fc = get_unaligned_le16(frame);
-	if ((fc & 0x47ff) != 0x4188 || frame[22] & 15 ) return;
+	if ((fc & 0x47ff) != 0x4188 || frame[22] & 15) return;
 	mutex_lock(&rx->uplink_lock);
 	for (macid = 1; macid < 128; macid++)
 		if (rx->keys[macid] && !memcmp(frame + 10, memory + 0xe400 + macid * 8, 6)) break;
 	if (macid == 128) goto unlock;
-	key = rx->keys[macid];
-	header = fc & 0x8000 ? 30 : 26;
 	tid = frame[24] & 15;
-	state = rx->uplink_states + (macid * 16 + tid) * 32;
-	sequence = ((get_unaligned_le16(frame + 22) >> 4) + 1) & 4095;
-	low = frame[header] | (u32)frame[header + 1] << 8 |
-		(u32)frame[header + 4] << 16 | (u32)frame[header + 5] << 24;
-	high = frame[header + 6] | (u32)frame[header + 7] << 8;
-	pn[0] = high >> 8; pn[1] = high; pn[2] = low >> 24; pn[3] = low >> 16; pn[4] = low >> 8; pn[5] = low;
+	rx->uplink_pending_tids[macid] |= BIT(tid);
 	local_bh_disable(); rcu_read_lock();
 	sta = ieee80211_find_sta_by_ifaddr(rx->hw, frame + 10, NULL);
-	if (sta && ieee80211_rx_shortcut_prepare(sta, key, tid, sequence, pn)) {
-		put_unaligned_le32(low, state + 4);
-		put_unaligned_le32(high, state + 8);
-		dma_wmb();
-		put_unaligned_le32(BIT(31) | sequence, state);
-	} else put_unaligned_le32(0, state);
+	if (!sta || !rtl_ax_rx_uplink_publish(rx, sta, rx->keys[macid], macid, tid))
+		put_unaligned_le32(0, rx->uplink_states + (macid * 16 + tid) * 32);
 	rcu_read_unlock(); local_bh_enable();
 unlock:
 	mutex_unlock(&rx->uplink_lock);
