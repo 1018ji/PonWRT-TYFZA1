@@ -9,9 +9,9 @@
 +			if (ieee80211_is_data_qos(accepted->frame_control) &&
 +			    !ieee80211_has_morefrags(accepted->frame_control) &&
 +			    !(accepted->seq_ctrl & cpu_to_le16(IEEE80211_SCTL_FRAG))) {
-+				rx->sta->rx_shortcut_next_seq[rx->security_idx] =
++				rx->key->rx_shortcut_next_seq[rx->security_idx] =
 +					((le16_to_cpu(accepted->seq_ctrl) >> 4) + 1) & 4095;
-+				rx->sta->rx_shortcut_key[rx->security_idx] = rx->key;
++				rx->key->rx_shortcut_valid_tids |= BIT(rx->security_idx);
 +			}
 +		}
  		CALL_RXH(ieee80211_rx_h_defragment);
@@ -35,17 +35,17 @@
 +	spin_lock_bh(&local->rx_path_lock);
 +	if (keyconf->cipher != WLAN_CIPHER_SUITE_CCMP || key->sta != sta ||
 +	    !test_sta_flag(sta, WLAN_STA_AUTHORIZED) ||
-+	    sta->rx_shortcut_key[tid] != key)
++	    !(key->rx_shortcut_valid_tids & BIT(tid)))
 +		goto out;
 +	ba = rcu_dereference(sta->ampdu_mlme.tid_rx[tid]);
 +	if (ba) {
 +		spin_lock_bh(&ba->reorder_lock);
 +		ready = !ba->stored_mpdu_num &&
-+			ba->head_seq_num == sta->rx_shortcut_next_seq[tid];
++			ba->head_seq_num == key->rx_shortcut_next_seq[tid];
 +		if (ready) *next_seq = ba->head_seq_num;
 +		spin_unlock_bh(&ba->reorder_lock);
 +	} else {
-+		*next_seq = sta->rx_shortcut_next_seq[tid];
++		*next_seq = key->rx_shortcut_next_seq[tid];
 +		ready = true;
 +	}
 +	if (ready) memcpy(pn, key->u.ccmp.rx_pn[tid], 6);
@@ -68,8 +68,8 @@
 +		if (memcmp(pn, key->u.ccmp.rx_pn[tid], 6) > 0)
 +			memcpy(key->u.ccmp.rx_pn[tid], pn, 6);
 +		sta->last_seq_ctrl[tid] = cpu_to_le16(((next_seq - 1) & 4095) << 4);
-+		sta->rx_shortcut_next_seq[tid] = next_seq;
-+		sta->rx_shortcut_key[tid] = key;
++		key->rx_shortcut_next_seq[tid] = next_seq;
++		key->rx_shortcut_valid_tids |= BIT(tid);
 +	}
 +	spin_unlock_bh(&local->rx_path_lock);
 +	ieee80211_mark_rx_ba_filtered_frames(pubsta, tid, next_seq, 0, received);
@@ -100,17 +100,17 @@
  
  /* main receive path */
  
---- a/net/mac80211/sta_info.h
-+++ b/net/mac80211/sta_info.h
-@@ -746,6 +746,8 @@
+--- a/net/mac80211/key.h
++++ b/net/mac80211/key.h
+@@ -65,6 +65,8 @@
  
- 	/* Plus 1 for non-QoS frames */
- 	__le16 last_seq_ctrl[IEEE80211_NUM_TIDS + 1];
+ 	/* protected by key mutex */
+ 	unsigned int flags;
 +	u16 rx_shortcut_next_seq[IEEE80211_NUM_TIDS];
-+	struct ieee80211_key *rx_shortcut_key[IEEE80211_NUM_TIDS];
++	u16 rx_shortcut_valid_tids;
  
- 	u16 tid_seq[IEEE80211_QOS_CTL_TID_MASK + 1];
- 
+ 	union {
+ 		struct {
 --- a/include/net/mac80211.h
 +++ b/include/net/mac80211.h
 @@ -6893,6 +6893,13 @@
