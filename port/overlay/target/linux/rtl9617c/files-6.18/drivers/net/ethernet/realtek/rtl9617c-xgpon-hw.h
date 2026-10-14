@@ -6,6 +6,7 @@
 
 #define RTL_XGPON_PLOAM_BYTES 48
 #define RTL_XGPON_PLOAM_TX_BYTES 40
+#define RTL_XGPON_ALLOC_ID_INVALID 0xbaadU /* Original ASIC invalid Alloc-ID. */
 
 static inline void rtl_xgpon_active(const struct rtl_dq_io *io, int enabled, int symmetric)
 {
@@ -84,7 +85,7 @@ static inline int rtl_xgpon_tcont_set(const struct rtl_dq_io *io,
 	if (ret)
 		return ret;
 	word = (io->read(io->context, 0x483c) & ~0x11003fffU) |
-	       alloc_id | (ploam ? 1U << 28 : 0) | (omci ? 1U << 24 : 0);
+	       (alloc_id & 0x3fffU) | (ploam ? 1U << 28 : 0) | (omci ? 1U << 24 : 0);
 	io->write(io->context, 0x483c, word);
 	return io->indirect(io->context, 0x4838, 0xc0000000U | index);
 }

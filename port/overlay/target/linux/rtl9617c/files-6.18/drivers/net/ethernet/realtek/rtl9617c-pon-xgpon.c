@@ -84,7 +84,7 @@ int rtl_pon_xgpon_prepare_locked(struct rtl9617c_pon *pon)
 	rtl_xgpon_identity(&io, pon->xgpon_serial, pon->xgpon_registration);
 	/* Start without mappings from any preceding ONU session. */
 	for (index = 0; index < 32; index++) {
-		ret = rtl_xgpon_tcont_set(&io, index, 0x3fff, false, false);
+		ret = rtl_xgpon_tcont_set(&io, index, RTL_XGPON_ALLOC_ID_INVALID, false, false);
 		if (ret)
 			goto unlock;
 	}
