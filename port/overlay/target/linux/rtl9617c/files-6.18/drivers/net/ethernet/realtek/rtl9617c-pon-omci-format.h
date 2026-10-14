@@ -5,25 +5,41 @@
 #define RTL_OMCI_PREFIX_BYTES 16
 #define RTL_OMCI_MAX_BODY 1980
 
-/* Original ca_generate_msk -> ca_generate_sk -> ca_generate_omci_ik. */
+/* Original ca_generate_msk -> ca_generate_sk, with Class332 MSK replacement. */
+static inline int rtl_omci_session_key(void *context,
+	int (*cmac)(void *, const unsigned char *, const unsigned char *, unsigned int, unsigned char *),
+	const unsigned char serial[8], const unsigned char registration[36],
+	const unsigned char tag[8], const unsigned char *supplied_msk, unsigned char result[16])
+{
+	unsigned char root[16], msk[16], message[24];
+	unsigned int i;
+	int ret = 0;
+
+	for (i = 0; i < 16; i++) root[i] = 0x55;
+	if (supplied_msk)
+		for (i = 0; i < 16; i++) msk[i] = supplied_msk[i];
+	else
+		ret = cmac(context, root, registration, 36, msk);
+	if (ret) return ret;
+	for (i = 0; i < 8; i++) { message[i] = serial[i]; message[i + 8] = tag[i]; }
+	for (i = 0; i < 8; i++) message[i + 16] = "SessionK"[i];
+	ret = cmac(context, msk, message, 24, result);
+	for (i = 0; i < 16; i++) msk[i] = 0;
+	return ret;
+}
+
 static inline int rtl_omci_derive_key(void *context,
 	int (*cmac)(void *, const unsigned char *, const unsigned char *, unsigned int, unsigned char *),
 	const unsigned char serial[8], const unsigned char registration[36],
 	const unsigned char tag[8], unsigned char result[16])
 {
-	unsigned char root[16], msk[16], session[16], message[24];
+	unsigned char session[16];
 	static const unsigned char label[16] = "OMCIIntegrityKey";
 	unsigned int i;
-	int ret;
+	int ret = rtl_omci_session_key(context, cmac, serial, registration, tag, 0, session);
 
-	for (i = 0; i < 16; i++) root[i] = 0x55;
-	ret = cmac(context, root, registration, 36, msk);
-	if (ret) return ret;
-	for (i = 0; i < 8; i++) { message[i] = serial[i]; message[i + 8] = tag[i]; }
-	for (i = 0; i < 8; i++) message[i + 16] = "SessionK"[i];
-	ret = cmac(context, msk, message, 24, session);
 	if (!ret) ret = cmac(context, session, label, 16, result);
-	for (i = 0; i < 16; i++) { msk[i] = 0; session[i] = 0; }
+	for (i = 0; i < 16; i++) session[i] = 0;
 	return ret;
 }
 

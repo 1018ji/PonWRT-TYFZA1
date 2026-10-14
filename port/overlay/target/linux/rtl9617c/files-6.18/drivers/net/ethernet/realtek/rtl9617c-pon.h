@@ -3,12 +3,19 @@
 #define RTL9617C_PON_H
 
 #include <linux/device.h>
+#include <linux/bitmap.h>
 #include <linux/gpio/consumer.h>
 #include <linux/mutex.h>
 #include <linux/workqueue.h>
 #include "rtl9617c-ni.h"
 #include "rtl9617c-pon-mode.h"
 #include "rtl9617c-mpcp-backoff.h"
+#include "rtl9617c-pon-path.h"
+
+struct rtl_itu_path_state {
+	struct rcu_head rcu;
+	struct rtl_itu_paths paths;
+};
 
 struct rtl9617c_pon {
 	struct device *dev;
@@ -30,6 +37,8 @@ struct rtl9617c_pon {
 	struct mutex control_lock;
 	struct delayed_work serdes_work;
 	struct delayed_work mpcp_work;
+	struct delayed_work xgpon_recovery_work;
+	bool xgpon_recover;
 	enum rtl_pon_mode mode;
 	unsigned int burst_polarity;
 	unsigned int los_invert;
@@ -92,6 +101,19 @@ struct rtl9617c_pon {
 	int xgpon_activation_error;
 	struct crypto_shash *omci_cmac, *omci_kdf;
 	spinlock_t omci_key_lock;
+	u8 xgpon_kek[16], xgpon_encrypted_key[2][16], xgpon_key_name[2][16];
+	u8 xgpon_key_valid, xgpon_key_state, xgpon_active_key;
+	u8 omci_master_key[16];
+	bool omci_master_key_valid;
+	u64 xgpon_key_reports, xgpon_key_tk4, xgpon_key_tk5;
+	struct rtl_itu_path_state __rcu *itu_paths;
+	bool itu_paths_ready;
+	int itu_paths_error;
+	u64 itu_path_epoch;
+	u64 itu_line_epoch;
+	u16 itu_alloc_ids[32];
+	u32 itu_alloc_valid;
+	DECLARE_BITMAP(itu_gpon_gems, 4096);
 };
 
 void rtl_pon_update(void __iomem *reg, u32 mask, u32 value);
@@ -111,7 +133,19 @@ int rtl_pon_xgpon_prepare_locked(struct rtl9617c_pon *pon);
 int rtl_pon_xgpon_activation_locked(struct rtl9617c_pon *pon, bool enable);
 void rtl_pon_xgpon_stop_locked(struct rtl9617c_pon *pon);
 void rtl_pon_xgpon_irq(struct rtl9617c_pon *pon);
+void rtl_pon_xgpon_recovery(struct work_struct *work);
 int rtl_pon_xgpon_omci_key(struct rtl9617c_pon *pon, const u8 tag[8]);
+void rtl_pon_xgpon_key_irq(struct rtl9617c_pon *pon, u32 interrupts, u32 control);
+ssize_t rtl_pon_omci_master_key(struct rtl9617c_pon *pon, const char *buf, size_t count);
+ssize_t rtl_pon_omci_broadcast_key(struct rtl9617c_pon *pon, const char *buf, size_t count);
+ssize_t rtl_pon_itu_paths_write(struct rtl9617c_pon *pon, const char *buf, size_t count);
+ssize_t rtl_pon_itu_paths_state(struct rtl9617c_pon *pon, char *buf);
+void rtl_pon_itu_carrier(struct rtl9617c_pon *pon);
+void rtl_pon_itu_paths_invalidate(struct rtl9617c_pon *pon);
+void rtl_pon_itu_paths_remove(struct rtl9617c_pon *pon);
+netdev_tx_t rtl_pon_itu_data_transmit(struct rtl9617c_pon *pon, struct sk_buff *skb, struct net_device *dev);
+void rtl_pon_itu_data_receive(struct rtl9617c_pon *pon, struct napi_struct *napi,
+	struct sk_buff *skb, unsigned int source);
 int rtl_pon_gpon_activation_locked(struct rtl9617c_pon *pon, bool enable);
 void rtl_pon_gpon_stop_locked(struct rtl9617c_pon *pon);
 void rtl_pon_gpon_irq(struct rtl9617c_pon *pon);

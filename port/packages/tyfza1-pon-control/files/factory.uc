@@ -15,6 +15,11 @@ function field(text, key) {
 		(m, entity) => ({ quot: '"', apos: "'", lt: '<', gt: '>', amp: '&' })[entity]);
 }
 
+function optional_field(text, key) {
+	const entry = match(text, regexp('<Value\\s+Name="' + key + '"\\s+Value="([^"]*)"'));
+	return entry ? field(text, key) : '';
+}
+
 function save(path, data) {
 	const full = output + '/' + path;
 	let directory = '';
@@ -74,7 +79,14 @@ const identity = {
 	onu_mac: mac(field(llid, 'macAddr')),
 	serial_number: field(hs, 'GPON_SN'),
 	vendor_id: field(hs, 'PON_VENDOR_ID'),
-	oam_model: field(hs, 'EPON_ONU_MODEL')
+	oam_model: field(hs, 'EPON_ONU_MODEL'),
+	loid: optional_field(cs, 'LOID'),
+	loid_password: optional_field(cs, 'LOID_PASSWD'),
+	ploam_password: optional_field(cs, 'GPON_PLOAM_PASSWD'),
+	registration_id: optional_field(cs, 'GPON_PLOAM_PASSWD'),
+	omci_psk: optional_field(cs, 'OMCI_PSK'),
+	equipment_id: optional_field(hs, 'GPON_ONU_MODEL'),
+	software_version: optional_field(cs, 'OMCI_SW_VER1')
 };
 let config = "config pon 'pon'\n";
 for (let key, value in identity)

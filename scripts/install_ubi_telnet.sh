@@ -15,6 +15,18 @@ volume() {
 	return 1
 }
 
+image_fits_volume() {
+	local path="/sys/class/ubi/${1##*/}"
+	local size=$(wc -c < "$2")
+	local capacity=$(( $(cat "$path/reserved_ebs") * $(cat "$path/usable_eb_size") ))
+	local limit=${3:-$capacity}
+	[ "$capacity" -le "$limit" ] || capacity=$limit
+	[ "$size" -le "$capacity" ] || {
+		echo "$2 is $size bytes; $1 image limit is $capacity bytes" >&2
+		return 1
+	}
+}
+
 if [ "${1:-install}" = commit ]; then
 	slot=$(sed -n 's/.*tyfza1.slot=\([01]\).*/\1/p' /proc/cmdline)
 	case "$slot" in
@@ -31,6 +43,8 @@ active=$(./fw_printenv -c ./fw_env.config -n sw_active)
 slot=$((1 - active))
 kernel=$(volume "ubi_k$slot")
 rootfs=$(volume "ubi_r$slot")
+image_fits_volume "$rootfs" rootfs.squashfs
+image_fits_volume "$kernel" kernel.itb 6291456
 echo "Updating existing ubi_k$slot and ubi_r$slot"
 ubiupdatevol "$rootfs" rootfs.squashfs
 ubiupdatevol "$kernel" kernel.itb

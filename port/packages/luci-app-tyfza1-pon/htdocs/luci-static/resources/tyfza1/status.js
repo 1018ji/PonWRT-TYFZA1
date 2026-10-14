@@ -43,7 +43,9 @@ function ponState(data) {
 		return { text: '未启用', tone: 'muted', help: 'PON 尚未启动或已停用。' };
 	if (/^(gpon|xgpon|xgspon)$/.test(serdes.mode))
 		return mac.activation === 'O5' && flag(mac.prepared)
-			? { text: '已激活 · O5', tone: 'good', help: 'PON 已激活；业务是否建立请结合上网接口状态确认。' }
+			? flag((data.data_path || {}).configured)
+				? { text: '已激活 · 业务已配置', tone: 'good' }
+				: { text: '已激活 · 等待业务下发', tone: 'warn' }
 			: { text: '等待激活', tone: 'warn', help: '当前激活状态：' + value(mac.activation) + '。激活不等同于上网成功。' };
 	if (!flag(mpcp.enabled) || !/^[0-9a-f]+$/i.test(mpcp.registered || '') || !parseInt(mpcp.registered, 16))
 		return { text: '等待注册', tone: 'warn', help: '光链路尚未完成 OLT 注册，请确认线路协议及认证信息。' };

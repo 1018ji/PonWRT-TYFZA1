@@ -1,8 +1,8 @@
 # PonWRT-TYFZA1
 
-感谢 [PonWrt](https://github.com/pbs05/ponwrt) 在 PON 与 OpenWrt 整合、原厂身份和校准保留、硬件转发及排障思路上提供的参考。本项目针对天翼 TYFZA1 / Realtek RTL9617CVW 独立适配。
+感谢 [PonWrt](https://github.com/pbs05/ponwrt) 在 PON 与 OpenWrt 整合、原厂身份和校准保留、硬件转发及排障思路上提供的参考。本项目针对天翼 TYFZA1 / Realtek RTL9617CVW 独立适配，OMCI 协议引擎使用其 GPL 源码；硬件配置以本机原厂实现为依据。
 
-**版本：0.1.0-alpha** · OpenWrt · Linux 6.18.55 · 四核 Cortex-A55
+**版本：0.2.0-alpha** · OpenWrt · Linux 6.18.55 · 四核 Cortex-A55
 
 ## 功能与进度
 
@@ -13,14 +13,15 @@
 | EPON-D10G 注册、CTC OAM、LOID、FEC、DHCP IPv4 | 已实测 |
 | 四 LAN 网桥 | 已接入；四口逐口完整测试待完成 |
 | 2.5G 网口 | 驱动已接入，链路与硬件转发待测试 |
-| 双频 WiFi、WPA2、HT/VHT80 | 已实测；HE 和更多终端兼容性待测试 |
+| 双频 WiFi、WPA2、HT/VHT80、Wi-Fi 6 | HT/VHT 已实测；HE 协商与发包参数已接入，兼容性待测试 |
 | IPv4 路由/NAT、WiFi 双向硬件加速 | 双频上下行硬件路径已实测；持续高负载丢包待优化 |
-| GPON、XG-PON、XGS-PON、其他 EPON 模式 | 适配进行中；业务与硬件转发待测试 |
+| GPON、XG-PON、XGS-PON | 已接入独立激活、OMCI、GEM/T-CONT 业务映射；OLT 互通与硬件转发待测试 |
+| 其他 EPON 模式 | 业务与硬件转发待测试 |
 | PPPoE | 已接入 OpenWrt 原生配置；拨号、业务与硬件转发待测试 |
 | 桥接 | 业务与硬件转发待测试 |
 | IPv6 | 已加入 DHCPv6、RA 和原生页面；公网、前缀下发与硬件转发待测试 |
 | VLAN/QinQ、多 LLID、多业务 | 待测试 |
-| 本版本冷启动、WiFi 停启、防火墙重载 | 已实测 |
+| 冷启动、WiFi 停启、防火墙重载 | 0.1 系列已实测；本版本待测试 |
 
 支持手动选择 PON 模式。认证参数均可留空；MAC、SN 和厂商标识留空时使用本机原厂身份。镜像的身份和光学/射频校准从当前设备的原厂分区读取。
 
@@ -62,7 +63,7 @@ sysupgrade /tmp/sysupgrade.bin
 
 通过 LAN 打开 `http://192.168.1.1/`，设置管理密码。
 
-- **网络 → PON 管理**：选择线路协议，填写运营商要求的 LOID、密码、SN、ONU MAC 等可选参数。
+- **网络 → PON 管理**：选择线路协议，填写运营商要求的 LOID、密码、SN、ONU MAC 等可选参数；OMCI 增强认证 PSK 仅在线路需要时填写。
 - **网络 → 接口 → WAN**：使用 OpenWrt 原生 DHCP/PPPoE、VLAN 和 IPv6 设置。默认业务设备为 `pon-data0`，VLAN 使用 `pon-data0.VID`。
 - **网络 → 无线**：设置名称、密码和国家/地区，然后启用无线。
 
@@ -70,10 +71,22 @@ sysupgrade /tmp/sysupgrade.bin
 
 1. 点击仓库右上角 **Fork**，然后进入自己的仓库。
 2. 打开 **Actions**，启用工作流。
-3. 选择 **Build TYFZA1 firmware → Run workflow**，选择分支，保留默认 `release_tag` 或填写新的版本标签，点击运行。
+3. 选择 **Build TYFZA1 firmware → Run workflow**，选择分支并填写 `release_tag`；自定义软件包时，将配置提交到仓库，在 `config_file` 填写配置文件路径。
 4. 编译成功后，在自己仓库的 **Releases** 下载固件，或在本次 Actions 运行的 **Artifacts** 中下载 `firmware-and-build-log`。
 
 密钥和编译所需附件会自动获取，无需配置 Secrets。
+
+本地运行 `sh port/scripts/sync-overlay.sh sources/openwrt` 后，在 OpenWrt 目录执行 `make menuconfig` 选择软件包，再运行 `sh port/scripts/build.sh sources/openwrt 4`。后续构建保留 `.config`；也可通过 `TYFZA1_CONFIG=/配置文件路径` 指定配置。
+
+镜像按所选软件包压缩生成，沿用原厂 UBI 卷大小：
+
+| 内容 | 大小上限 |
+| --- | --- |
+| `kernel.itb` | 6,291,456 字节（6 MiB，原厂 U-Boot 读取长度） |
+| `rootfs.squashfs` | 33,648,640 字节（约 32.09 MiB，原厂 rootfs 卷容量） |
+| 可写 `rootfs_data` | 16 MiB，UBIFS 可用空间扣除文件系统开销 |
+
+`sysupgrade.bin` 和安装包中的内核、rootfs 分别写入对应卷。编译时检查镜像上限；安装和升级时读取设备实际卷容量，超出容量会报错。
 
 ## 协议
 

@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
-/* Wire vectors normalized from pon-fw-r1's CTC/802.3ah tests to plain Ethernet. */
+/* CTC/802.3ah interoperability wire vectors normalized to plain Ethernet. */
 #include <assert.h>
 #include <errno.h>
 #include <stdio.h>

@@ -1,6 +1,7 @@
 #!/bin/sh
 # SPDX-License-Identifier: GPL-2.0-only
 set -eu
+export TYFZA1_CARGO=${TYFZA1_CARGO:-$(command -v cargo)}
 export PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
 if [ -n "${TYFZA1_PROXY:-}" ]; then
     export http_proxy=$TYFZA1_PROXY https_proxy=$TYFZA1_PROXY

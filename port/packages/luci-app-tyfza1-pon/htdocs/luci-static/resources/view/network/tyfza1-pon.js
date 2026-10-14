@@ -78,19 +78,18 @@ return view.extend({
 	};
 		o.retain = true;
 		o.placeholder = '留空使用本机原厂 MAC';
-		o.description = '用于 EPON 注册。填写后覆盖本机原厂身份，清空后恢复原厂身份。';
-		eponModes.forEach(function(mode) { o.depends('mode', mode); });
+		o.description = '填写后覆盖本机原厂身份，清空后恢复原厂身份。';
 		[
-			['loid', 'LOID', 24, false, eponModes],
-			['loid_password', 'LOID 密码', 12, true, eponModes],
+			['loid', 'LOID', 24, false, eponModes.concat(ituModes)],
+			['loid_password', 'LOID 密码', 12, true, eponModes.concat(ituModes)],
 			['serial_number', 'ONU 序列号（SN）', 16, false, ituModes],
 			['registration_id', 'Registration ID', 36, true, ['xgpon', 'xgspon']],
 			['ploam_password', 'PLOAM 密码', 10, true, ['gpon']],
 			['vendor_id', '厂商 ID', 4, false, eponModes],
 			['oam_model', 'OAM 型号标识', 4, false, eponModes],
-			['equipment_id', '设备型号', 20, false, eponModes],
-			['hardware_version', '硬件版本', 16, false, eponModes],
-			['software_version', '软件版本', 16, false, eponModes]
+			['equipment_id', '设备型号', 20, false, eponModes.concat(ituModes)],
+			['hardware_version', '硬件版本', 16, false, eponModes.concat(ituModes)],
+			['software_version', '软件版本', 16, false, eponModes.concat(ituModes)]
 		].forEach(function(field, index) {
 			o = s.taboption(index < 5 ? 'identity' : 'advanced', form.Value, field[0], field[1]);
 			o.validate = byteLimit(field[2]);
@@ -103,6 +102,13 @@ return view.extend({
 				o.validate = function(section, text) { return text === '' || /^(?:[\x20-\x7e]{4}[0-9a-fA-F]{8}|[0-9a-fA-F]{16})$/.test(text) || '请输入有效的 12 字符 SN 或 16 位十六进制 SN。'; };
 			}
 		});
+		o = s.taboption('identity', form.Value, 'omci_psk', 'OMCI 增强认证 PSK');
+		o.password = true;
+		o.retain = true;
+		o.placeholder = '选填';
+		o.description = '运营商要求增强认证时填写 32 位十六进制密钥。';
+		o.validate = function(section, text) { return text === '' || /^[0-9a-f]{32}$/i.test(text) || '请输入 32 位十六进制密钥。'; };
+		ituModes.forEach(function(mode) { o.depends('mode', mode); });
 		if (uci.get('network', 'wan', '.type') === 'interface') {
 			var protocol = uci.get('network', 'wan', 'proto');
 			o = s.taboption('wan', form.DummyValue, '_wan_protocol', '当前连接方式');

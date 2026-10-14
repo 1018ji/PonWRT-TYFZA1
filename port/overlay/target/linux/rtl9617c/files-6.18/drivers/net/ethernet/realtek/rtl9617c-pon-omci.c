@@ -3,9 +3,24 @@
 #include <linux/if_arp.h>
 #include <linux/netdevice.h>
 #include <linux/unaligned.h>
+#include <linux/io.h>
+#include <linux/iopoll.h>
+#include <linux/random.h>
+#include <crypto/aes.h>
 #include <crypto/hash.h>
 #include "rtl9617c-pon.h"
 #include "rtl9617c-pon-omci-format.h"
+#include "rtl9617c-xgpon-hw.h"
+
+static unsigned int key_read(void *context, unsigned int address)
+{
+	return readl(((struct rtl9617c_pon *)context)->mac + address);
+}
+
+static void key_write(void *context, unsigned int address, unsigned int value)
+{
+	writel(value, ((struct rtl9617c_pon *)context)->mac + address);
+}
 
 static int rtl_omci_cmac(void *context, const u8 *key, const u8 *data, unsigned int bytes, u8 *result)
 {
@@ -21,13 +36,34 @@ static int rtl_omci_cmac(void *context, const u8 *key, const u8 *data, unsigned 
 
 int rtl_pon_xgpon_omci_key(struct rtl9617c_pon *pon, const u8 tag[8])
 {
-	u8 key[16];
+	const struct rtl_dq_io io = {pon, key_read, key_write, NULL};
+	static const u8 omci_label[16] = "OMCIIntegrityKey";
+	static const u8 kek_label[16] = "KeyEncryptionKey";
+	/* Exact16-byte label used by this board's ca_generate_ploam_ik. */
+	static const u8 ploam_label[16] = "PLOAMIntegrtyKey";
+	u8 key[16], session[16], integrity[16];
 	int ret;
 
 	lockdep_assert_held(&pon->lock);
 	if (pon->xgpon_key_ready && !memcmp(pon->xgpon_tag, tag, 8)) return 0;
-	ret = rtl_omci_derive_key(pon->omci_kdf, rtl_omci_cmac, pon->xgpon_serial,
-		pon->xgpon_registration, tag, key);
+	spin_lock_bh(&pon->omci_key_lock);
+	pon->xgpon_key_ready = false;
+	spin_unlock_bh(&pon->omci_key_lock);
+	ret = rtl_omci_session_key(pon->omci_kdf, rtl_omci_cmac, pon->xgpon_serial,
+		pon->xgpon_registration, tag, pon->omci_master_key_valid ? pon->omci_master_key : NULL, session);
+	if (!ret) ret = rtl_omci_cmac(pon->omci_kdf, session, omci_label, 16, key);
+	if (!ret) ret = rtl_omci_cmac(pon->omci_kdf, session, kek_label, 16, pon->xgpon_kek);
+	if (!ret && pon->omci_master_key_valid) {
+		ret = rtl_omci_cmac(pon->omci_kdf, session, ploam_label, 16, integrity);
+		if (!ret) {
+			rtl_pon_update(pon->mac + 0x4e00, BIT(6), 0);
+			rtl_xgpon_key_words(&io, 0x4e14, pon->omci_master_key);
+			rtl_xgpon_key_words(&io, 0x4e24, session);
+			rtl_pon_update(pon->mac + 0x4e04, BIT(2), BIT(2));
+			rtl_xgpon_key_words(&io, 0x4e34, integrity);
+			rtl_pon_update(pon->mac + 0x4e04, BIT(3), BIT(3));
+		}
+	}
 	if (!ret) {
 		spin_lock_bh(&pon->omci_key_lock);
 		ret = crypto_shash_setkey(pon->omci_cmac, key, 16);
@@ -36,7 +72,123 @@ int rtl_pon_xgpon_omci_key(struct rtl9617c_pon *pon, const u8 tag[8])
 		spin_unlock_bh(&pon->omci_key_lock);
 	}
 	memzero_explicit(key, sizeof(key));
+	memzero_explicit(session, sizeof(session));
+	memzero_explicit(integrity, sizeof(integrity));
 	return ret;
+}
+
+ssize_t rtl_pon_omci_master_key(struct rtl9617c_pon *pon, const char *buf, size_t count)
+{
+	u8 master[16], tag[8];
+	int ret;
+
+	if (count != 32) return -EMSGSIZE;
+	ret = hex2bin(master, buf, 16);
+	if (ret) return ret;
+	mutex_lock(&pon->control_lock);
+	mutex_lock(&pon->lock);
+	memcpy(pon->omci_master_key, master, 16);
+	pon->omci_master_key_valid = true;
+	ret = 0;
+	if (pon->mode == RTL_PON_XGPON || pon->mode == RTL_PON_XGSPON) {
+		memcpy(tag, pon->xgpon_tag, 8);
+		spin_lock_bh(&pon->omci_key_lock);
+		pon->xgpon_key_ready = false;
+		spin_unlock_bh(&pon->omci_key_lock);
+		ret = rtl_pon_xgpon_omci_key(pon, tag);
+	}
+	mutex_unlock(&pon->lock);
+	mutex_unlock(&pon->control_lock);
+	memzero_explicit(master, sizeof(master));
+	return ret ? ret : count;
+}
+
+void rtl_pon_xgpon_key_irq(struct rtl9617c_pon *pon, u32 interrupts, u32 control)
+{
+	const struct rtl_dq_io io = {pon, key_read, key_write, NULL};
+	static const u8 name_suffix[16] = "3141592653589793"; /* Original ca_generate_kek_name constant. */
+	u8 message[40] = {}, key[16], name[32];
+	struct crypto_aes_ctx aes;
+	u32 status;
+	unsigned int flag = (control >> 8) & 255, index = (control >> 16) & 255;
+	int ret = 0;
+
+	lockdep_assert_held(&pon->lock);
+	if (interrupts & BIT(7)) {
+		if (!pon->xgpon_key_ready || index < 1 || index > 2 || flag > 1) { ret = -EPROTO; goto error; }
+		index--;
+		if (!flag) {
+			get_random_bytes(key, 16);
+			ret = aes_expandkey(&aes, pon->xgpon_kek, 16);
+			if (ret) goto error;
+			aes_encrypt(&aes, pon->xgpon_encrypted_key[index], key);
+			memcpy(name, key, 16); memcpy(name + 16, name_suffix, 16);
+			ret = rtl_omci_cmac(pon->omci_kdf, pon->xgpon_kek, name, 32, pon->xgpon_key_name[index]);
+			if (ret) goto error;
+			rtl_xgpon_data_key(&io, index, key);
+			rtl_pon_update(pon->mac + 0x4124, BIT(index), BIT(index));
+			pon->xgpon_key_valid |= BIT(index);
+			if (pon->xgpon_key_state != 4 || pon->xgpon_active_key != index)
+				pon->xgpon_key_state = 2;
+		} else {
+			if (!(pon->xgpon_key_valid & BIT(index))) { ret = -ENOKEY; goto error; }
+			rtl_xgpon_key_confirm(&io, index);
+			pon->xgpon_active_key = index;
+			if (pon->xgpon_key_state == 2) pon->xgpon_key_state = 4;
+		}
+		rtl_xgpon_key_report(message, pon->xgpon_omcc_id, control,
+			flag ? pon->xgpon_key_name[index] : pon->xgpon_encrypted_key[index]);
+		ret = readl_poll_timeout(pon->mac + 0x4afc, status, !(status & BIT(31)), 1, 10000);
+		if (!ret) {
+			rtl_xgpon_ploam_transmit(&io, message, false);
+			pon->xgpon_key_reports++; pon->ploam_tx++;
+		}
+	}
+error:
+	if (interrupts & BIT(5)) {
+		pon->xgpon_key_tk4++;
+		if (pon->xgpon_key_state == 2) pon->xgpon_key_state = 0;
+	}
+	if (interrupts & BIT(6)) pon->xgpon_key_tk5++;
+	if (ret) pon->xgpon_activation_error = ret;
+	memzero_explicit(key, sizeof(key));
+	memzero_explicit(name, sizeof(name));
+	memzero_explicit(&aes, sizeof(aes));
+}
+
+ssize_t rtl_pon_omci_broadcast_key(struct rtl9617c_pon *pon, const char *buf, size_t count)
+{
+	const struct rtl_dq_io io = {pon, key_read, key_write, NULL};
+	const u8 *row = (const u8 *)buf;
+	struct crypto_aes_ctx aes;
+	u8 key[16] = {};
+	unsigned int operation, slot;
+	int ret = 0;
+
+	if (count != 18) return -EMSGSIZE;
+	operation = row[0]; slot = row[1] >> 6;
+	if (operation > 2 || (operation != 2 && ((row[1] & 63) || slot < 1 || slot > 2))) return -EINVAL;
+	mutex_lock(&pon->control_lock);
+	mutex_lock(&pon->lock);
+	if (pon->mode != RTL_PON_XGPON && pon->mode != RTL_PON_XGSPON) { ret = -EOPNOTSUPP; goto out; }
+	if (!operation) {
+		if (!pon->xgpon_key_ready) { ret = -ENOKEY; goto out; }
+		ret = aes_expandkey(&aes, pon->xgpon_kek, 16);
+		if (ret) goto out;
+		aes_decrypt(&aes, key, row + 2);
+		rtl_xgpon_multicast_key(&io, slot - 1, key, true);
+	} else if (operation == 1) {
+		rtl_xgpon_multicast_key(&io, slot - 1, key, false);
+	} else {
+		rtl_xgpon_multicast_key(&io, 0, key, false);
+		rtl_xgpon_multicast_key(&io, 1, key, false);
+	}
+out:
+	mutex_unlock(&pon->lock);
+	mutex_unlock(&pon->control_lock);
+	memzero_explicit(key, sizeof(key));
+	memzero_explicit(&aes, sizeof(aes));
+	return ret ? ret : count;
 }
 
 static int rtl_omci_mic(struct rtl9617c_pon *pon, u8 direction, const u8 *data, unsigned int bytes, u8 mic[4])
@@ -63,6 +215,10 @@ static int rtl_omci_open(struct net_device *dev)
 	struct rtl9617c_pon *pon = *(struct rtl9617c_pon **)netdev_priv(dev);
 	int ret = rtl9617c_ni_open(pon->ni_dev);
 
+	if (!ret) {
+		ret = rtl9617c_ni_oam_configure(pon->ni_dev);
+		if (ret) rtl9617c_ni_close(pon->ni_dev, dev);
+	}
 	if (!ret)
 		netif_start_queue(dev);
 	return ret;

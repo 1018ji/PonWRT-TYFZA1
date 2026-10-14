@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 /* Native IEEE802.3ah discovery and CTC LOID/identity codec.
- * Protocol layouts cross-checked with pon-fw-r1's epon_oamd and TYFZA1 OAM DAL.
+ * Protocol layouts cross-checked with CTC interoperability traces and TYFZA1 OAM DAL.
  * Input/output are ordinary Ethernet frames; each Linux interface owns one LLID.
  */
 #include <errno.h>
@@ -197,7 +197,7 @@ static int receive_auth(struct pon_oam_session *session, const struct pon_oam_id
 		return -EMSGSIZE;
 	code = input[22];
 	size = be16(input + 23);
-	/* pon-fw-r1 field interoperability: 0101 encodes an implicit type1 challenge. */
+	/* CTC field interoperability: 0101 encodes an implicit type1 challenge. */
 	if (!(code == 1 && size == 0x0101) && size > length - 25)
 		return -EMSGSIZE;
 	if (code == 3) {

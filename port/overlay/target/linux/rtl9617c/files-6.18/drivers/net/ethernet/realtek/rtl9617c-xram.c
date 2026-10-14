@@ -103,6 +103,12 @@ int rtl9617c_ni_fe_add_port(struct device *dev,struct net_device *netdev,unsigne
  return rtl_fe_add_port(priv->fe,netdev,7,32+llid,llid);
 }
 EXPORT_SYMBOL_GPL(rtl9617c_ni_fe_add_port);
+int rtl9617c_ni_itu_paths(struct device *dev, struct net_device *netdev, const struct rtl_itu_paths *paths)
+{
+ struct rtl_xram *priv=netdev_priv(dev_get_drvdata(dev));
+ return rtl_fe_set_itu_paths(priv->fe,netdev,paths);
+}
+EXPORT_SYMBOL_GPL(rtl9617c_ni_itu_paths);
 void rtl9617c_ni_fe_remove_port(struct device *dev,struct net_device *netdev)
 {
  struct rtl_xram *priv=netdev_priv(dev_get_drvdata(dev));

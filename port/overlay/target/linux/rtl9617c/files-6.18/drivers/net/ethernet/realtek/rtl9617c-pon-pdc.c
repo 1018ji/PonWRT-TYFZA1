@@ -146,9 +146,13 @@ int rtl_pon_fe_configure_locked(struct rtl9617c_pon *pon,bool enable)
    }
  if(pon->pdc_configured && !rtl_pon_mode_is_epon(pon->mode))
   for(entry=8;entry<256;entry++) {
+   u32 data;
    /* ITU selectors0..7 retain OMCI CPU containers; data follows the GEM map. */
-   writel(((enable?24:16)<<3)|(7<<9)|(enable?0:BIT(15)),pon->mac+PDC_DATA0);
-   writel((entry-8)<<4,pon->mac+PDC_DATA1);
+   ret=rtl_pdc_access(pon,entry,false);
+   if(ret)goto unlock;
+   data=readl(pon->mac+PDC_DATA0);
+   writel((data&~((63U<<3)|BIT(15)))|((enable?24:16)<<3)|
+    (enable?0:BIT(15)),pon->mac+PDC_DATA0);
    ret=rtl_pdc_access(pon,entry,true);
    if(ret)goto unlock;
   }

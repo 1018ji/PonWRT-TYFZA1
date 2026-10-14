@@ -183,6 +183,7 @@ struct rtl_fe_ipv4_action {
  unsigned char translate, translate_destination, deep_queue;
  unsigned char vlan_set, vlan_count;
  unsigned char pppoe_pop, mtu_set, mtu_index;
+ unsigned char gem_set, gem_index;
  struct rtl_fe_vlan vlan[2]; /* Outermost tag first; TPID hardware index+1. */
 };
 
@@ -218,6 +219,12 @@ static inline void rtl_fe_ipv4_action(unsigned int words[RTL_FE_ACTION_WORDS],
  rtl_fe_action_set(words, RTL_FE_PPPOE_VLD1, 0);
  rtl_fe_action_set(words, RTL_FE_IP_MTU_ENC_VLD1, action->mtu_set);
  rtl_fe_action_set(words, RTL_FE_IP_MTU_ENC1, action->mtu_index);
+ if(action->gem_set) {
+  /* Original CN2 mode0: policer is disabled; POL_ID carries the internal GEM. */
+  rtl_fe_action_set(words,RTL_FE_POL_VLD1,1);
+  rtl_fe_action_set(words,RTL_FE_POL_EN1,0);
+  rtl_fe_action_set(words,RTL_FE_POL_ID1,action->gem_index);
+ }
  if(action->vlan_set) {
   rtl_fe_action_set(words,RTL_FE_VLAN_VLD1,1);
   rtl_fe_action_set(words,RTL_FE_VLAN_CNT1,action->vlan_count);

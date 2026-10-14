@@ -8,6 +8,56 @@
 #define RTL_XGPON_PLOAM_TX_BYTES 40
 #define RTL_XGPON_ALLOC_ID_INVALID 0xbaadU /* Original ASIC invalid Alloc-ID. */
 
+static inline void rtl_xgpon_key_words(const struct rtl_dq_io *io, unsigned int address,
+		const unsigned char key[16])
+{
+	unsigned int i;
+
+	for (i = 0; i < 16; i += 4)
+		io->write(io->context, address + i, (unsigned int)key[i] << 24 |
+			(unsigned int)key[i + 1] << 16 | (unsigned int)key[i + 2] << 8 | key[i + 3]);
+}
+
+static inline void rtl_xgpon_data_key(const struct rtl_dq_io *io, unsigned int index,
+		const unsigned char key[16])
+{
+	/* Stock aal_xgpon_aes_uc_enc_key_set with p_key_active=0 and length16. */
+	io->write(io->context, 0x4614, io->read(io->context, 0x4614));
+	io->write(io->context, 0x4e00, (io->read(io->context, 0x4e00) & ~31U) | 16);
+	rtl_xgpon_key_words(io, 0x4f00 + index * 16, key);
+}
+
+static inline void rtl_xgpon_key_confirm(const struct rtl_dq_io *io, unsigned int index)
+{
+	unsigned int value = io->read(io->context, 0x4614);
+
+	if ((value & 1) != index) io->write(io->context, 0x4614, (value & ~1U) | index);
+	io->write(io->context, 0x4600, io->read(io->context, 0x4600) | (1U << 7));
+}
+
+static inline void rtl_xgpon_multicast_key(const struct rtl_dq_io *io, unsigned int index,
+		const unsigned char key[16], int enabled)
+{
+	unsigned int valid = io->read(io->context, 0x4128);
+	unsigned int control = io->read(io->context, 0x4e00);
+
+	rtl_xgpon_key_words(io, 0x4f20 + index * 16, key);
+	io->write(io->context, 0x4128, (valid & ~(1U << index)) | (enabled ? 1U << index : 0));
+	io->write(io->context, 0x4e00, (control & ~31U) | 16);
+}
+
+static inline void rtl_xgpon_key_report(unsigned char message[40], unsigned int onu_id,
+		unsigned int control, const unsigned char fragment[16])
+{
+	unsigned int i;
+
+	for (i = 0; i < 40; i++) message[i] = 0;
+	message[0] = onu_id >> 8; message[1] = onu_id;
+	message[2] = 5; message[3] = control;
+	message[4] = control >> 8; message[5] = control >> 16;
+	for (i = 0; i < 16; i++) message[i + 8] = fragment[i];
+}
+
 static inline void rtl_xgpon_active(const struct rtl_dq_io *io, int enabled, int symmetric)
 {
 	/* Stock aal_pon_mac_enable_set: GPON family mode minus GPON is 1 or 2. */
