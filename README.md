@@ -12,6 +12,7 @@
 | 原厂 telnet 安装、sysupgrade、断电启动 | 已实测 |
 | EPON-D10G 注册、CTC OAM、LOID、FEC、DHCP IPv4 | 已实测 |
 | 四 LAN 网桥 | 已接入；四口逐口完整测试待完成 |
+| 2.5G 网口 | 驱动已接入，链路与硬件转发待测试 |
 | 双频 WiFi、WPA2、HT/VHT80 | 已实测；HE 和更多终端兼容性待测试 |
 | IPv4 路由/NAT、WiFi 双向硬件加速 | 双频上下行硬件路径已实测；持续高负载丢包待优化 |
 | GPON、XG-PON、XGS-PON、其他 EPON 模式 | 适配进行中；业务与硬件转发待测试 |

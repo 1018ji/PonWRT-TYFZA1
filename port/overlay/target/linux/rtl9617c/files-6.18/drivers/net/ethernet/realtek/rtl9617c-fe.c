@@ -27,7 +27,7 @@
 #define FE_INTERFACES 64
 #define FE_COUNTERS 32
 #define FE_SOURCE_MACS 15
-#define FE_LAN_PORTS 4
+#define FE_LAN_PORTS 5
 #define FE_LAN_RX_CTRL(port) (0xa5f8+0x90*(port))
 
 struct rtl_fe_port {
@@ -224,7 +224,7 @@ static int fe_prepare(struct rtl_fe *fe)
  fe_write(fe,0x351c,(fe_read(fe,0x351c)&~(0x3fU<<16|7U<<24))|BIT(31)|16U<<16);
  for(i=0;i<2;i++) {
   rtl_fe_classify_hash(cls,0,i?7:0);
-  /* LAN0..3 share a connector, but CPU misses and flow keys must retain
+  /* LAN0..4 share a connector, but CPU misses and flow keys must retain
    * the real ingress port. PON keeps its logical source7. */
   if(!i)rtl_fe_bits_set(cls,208,1,0);
   ret=rtl_fe_classifier_write(&io,1024+i,cls);
@@ -254,8 +254,8 @@ static int fe_prepare(struct rtl_fe *fe)
  fe_write(fe,0x3280,0x77); /* Original parser TPID defaults. */
  /* The Linux rule already selected the physical LAN output. A second
   * L2 lookup would override it with the indexed DA entry's forwarding port.
-  * NI demux3 enters L2TM directly; only LAN0..3's selectors change. */
- fe_write(fe,0xa1e0,fe_read(fe,0xa1e0)|0xff);
+  * NI demux3 enters L2TM directly; only LAN0..4's selectors change. */
+ fe_write(fe,0xa1e0,fe_read(fe,0xa1e0)|0x3ff);
  rtl_fe_cache_start(&io);
  return 0;
 }

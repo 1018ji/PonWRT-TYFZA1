@@ -39,7 +39,7 @@ struct rtl_qm_rx {
 	u32 last_header[2];
 	u32 trace[32][7];
 	unsigned int trace_count;
-	struct net_device __rcu *lan[4];
+	struct net_device __rcu *lan[5];
 	struct rtl_qm_refill refill;
 	struct rtl9617c_ni_endpoint __rcu *pon;
 	struct rtl9617c_ni_wifi_endpoint __rcu *wifi[RTL_WIFI_ID_MAX + 1];
