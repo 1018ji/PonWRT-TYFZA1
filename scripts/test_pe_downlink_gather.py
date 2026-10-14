@@ -27,7 +27,7 @@ def case(lengths, cap):
     u.mem_write(0x1fc00000, binary)
     put = lambda at, value: u.mem_write(at, struct.pack('<I', value))
     get = lambda at: struct.unpack('<I', u.mem_read(at, 4))[0]
-    ap, dst = bytes.fromhex('02e04c076805'), bytes.fromhex('067afb78b287')
+    ap, dst = bytes.fromhex('020000000001'), bytes.fromhex('020000000002')
     u.mem_write(mb + 64, ap)
     for index, value in [(0, 0x50455744), (2, bar | 0xa0000000), (3, 1),
                          (11, ring), (12, pages), (14, headers), (24, 1),
