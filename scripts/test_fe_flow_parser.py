@@ -38,6 +38,7 @@ common = r'''
 #include <linux/ip.h>
 #include <linux/ppp_defs.h>
 #include "rtl9617c-fe-format.h"
+#include "rtl9617c-pon-path.h"
 typedef uint8_t u8;typedef uint16_t u16,__be16;typedef uint32_t u32;
 #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
 #define htons(v) __builtin_bswap16((uint16_t)(v))
@@ -112,7 +113,7 @@ static u32 get_unaligned(const u32 *p){u32 v;memcpy(&v,p,4);return v;}
 static void put_unaligned(u32 v,u32 *p){memcpy(p,&v,4);}
 struct rtl_fe;
 struct rtl_fe_port {struct rtl_fe *fe;struct net_device *netdev;unsigned int source,destination,llid,wifi_id;};
-struct rtl_fe {struct rtl_fe_port *ports[2];};
+struct rtl_fe {struct rtl_fe_port *ports[2];struct net_device *itu_netdev;struct rtl_itu_paths *itu_paths;};
 static struct rtl_fe_port *fe_port(struct rtl_fe *fe,struct net_device *dev){for(unsigned int i=0;i<2;i++)if(fe->ports[i]->netdev==dev)return fe->ports[i];return NULL;}
 struct net {};
 enum flow_offload_tuple_dir {FLOW_OFFLOAD_DIR_ORIGINAL,FLOW_OFFLOAD_DIR_REPLY};
@@ -332,6 +333,31 @@ int main(void)
     assert(parsed.egress_pppoe==(direction?0:3U|sid<<2));
     assert(parsed.mtu==(direction?0:1492));
     assert(parsed.ethernet_bytes==(direction?14:26));
+    for(unsigned int llid=0;llid<32;llid++) {
+     pp.llid=llid;pp.destination=32+llid;
+     memset(&parsed,0,sizeof(parsed));
+     assert(!fe_parse(direction?&pp:&lp,&cls,&parsed));
+     assert(parsed.key.llid==(direction?llid:0));
+     assert(parsed.key6.llid==(ipv6&&direction?llid:0));
+     assert(parsed.action.destination==(direction?0:32+llid));
+    }
+    pp.llid=0;pp.destination=32;
+    struct rtl_itu_paths paths={.count=1,.path={{.alloc_id=1063,.gem_id=0x8327,
+     .vlan=100,.tcont=3,.pbits=255,.queue=2,.encrypted=1,.index=8}}};
+    fe.itu_netdev=&pon;fe.itu_paths=&paths;
+    memset(&parsed,0,sizeof(parsed));
+    assert(!fe_parse(direction?&pp:&lp,&cls,&parsed));
+    assert(parsed.key.llid==(direction?8:0));
+    if(ipv6)assert(parsed.key6.llid==(direction?8:0));
+    assert(parsed.action.destination==(direction?0:35));
+    assert(parsed.action.gem_set==!direction && !parsed.action.deep_queue);
+    if(!direction)assert(parsed.action.gem_index==8 && parsed.action.cos==2);
+    paths.path[0].pbits=1;
+    memset(&parsed,0,sizeof(parsed));
+    assert(fe_parse(direction?&pp:&lp,&cls,&parsed)==-EOPNOTSUPP);
+    fe.itu_netdev=NULL;fe.itu_paths=NULL;
+    memset(&parsed,0,sizeof(parsed));
+    assert(!fe_parse(direction?&pp:&lp,&cls,&parsed));
     rtl_fe_ipv4_action(words,&parsed.action);
     assert(((words[190/32]>>(190%32))&1)==direction);
     assert(!((words[189/32]>>(189%32))&1));

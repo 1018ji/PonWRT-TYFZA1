@@ -125,12 +125,13 @@
  		flow_offload_teardown(flow);
  }
  
-@@ -823,7 +841,7 @@
+@@ -823,7 +841,8 @@
  {
  	struct net_device *dev = netdev_notifier_info_to_dev(ptr);
  
 -	if (event != NETDEV_DOWN)
-+	if (event != NETDEV_DOWN && event != NETDEV_CHANGEMTU)
++	if (event != NETDEV_DOWN && event != NETDEV_CHANGEMTU &&
++	    (event != NETDEV_CHANGE || netif_carrier_ok(dev)))
  		return NOTIFY_DONE;
  
  	nf_flow_table_cleanup(dev);

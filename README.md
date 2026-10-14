@@ -10,15 +10,18 @@
 | --- | --- |
 | 系统启动、NAND/UBI、watchdog | 已实测 |
 | 原厂 telnet 安装、sysupgrade、断电启动 | 已实测 |
-| EPON-D10G 注册、CTC OAM、LOID、FEC、DHCP IPv4 | 已实测 |
 | 四 LAN 网桥 | 已接入；四口逐口完整测试待完成 |
 | 2.5G 网口 | 驱动已接入，链路与硬件转发待测试 |
 | 双频 WiFi、WPA2、HT/VHT80、Wi-Fi 6 | HT/VHT 已实测；HE 协商与发包参数已接入，兼容性待测试 |
 | IPv4 路由/NAT、WiFi 双向硬件加速 | 双频上下行硬件路径已实测；持续高负载丢包待优化 |
-| GPON、XG-PON、XGS-PON | 已接入独立激活、OMCI、GEM/T-CONT 业务映射；OLT 互通与硬件转发待测试 |
-| 其他 EPON 模式 | 业务与硬件转发待测试 |
+| EPON（1G/1G） | 独立 MAC/PCS/FEC、MPCP 和 CTC OAM 已接入；业务与硬件转发待测试 |
+| 10G-EPON 非对称（10G/1G） | 注册、CTC OAM、LOID、FEC、DHCP 和双向硬件路径已实测；PPPoE、桥接待测试 |
+| 10G-EPON 对称（10G/10G） | 独立 MAC/PCS/FEC、MPCP 和 CTC OAM 已接入；业务与硬件转发待测试 |
+| GPON | GTC 激活、PLOAM、OMCI 和 GEM/T-CONT 业务映射已接入；OLT 互通与硬件转发待测试 |
+| XG-PON | 非对称 XGTC 激活、PLOAM、OMCI 和业务映射已接入；OLT 互通与硬件转发待测试 |
+| XGS-PON | 对称 XGTC 激活、PLOAM、OMCI 和业务映射已接入；OLT 互通与硬件转发待测试 |
 | PPPoE | 已接入 OpenWrt 原生配置；拨号、业务与硬件转发待测试 |
-| 桥接 | 业务与硬件转发待测试 |
+| 桥接 | Linux 桥接已接入；透明桥接硬件学习入口待接入 |
 | IPv6 | 已加入 DHCPv6、RA 和原生页面；公网、前缀下发与硬件转发待测试 |
 | VLAN/QinQ、多 LLID、多业务 | 待测试 |
 | 冷启动、WiFi 停启、防火墙重载 | 0.1 系列已实测；本版本待测试 |
