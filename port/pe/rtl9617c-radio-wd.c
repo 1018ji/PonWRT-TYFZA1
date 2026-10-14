@@ -269,8 +269,8 @@ void pe_main(volatile u32 *control)
 		if (consumer == mailbox[8]) {
 			if (!mailbox[24]) continue;
 #ifdef PE_UPLINK
-			ni_ingest(mailbox, memory);
-			ni_ingest(mailbox, memory);
+			for (u32 batch = 0; batch < 8; batch++)
+				if (!ni_ingest(mailbox, memory)) break;
 			ni_frames = ni_select(mailbox, memory, ni_request);
 			if (!ni_frames) continue;
 #else
@@ -404,18 +404,25 @@ void pe_main(volatile u32 *control)
 		}
 		if (flags & BIT(21)) {
 			u8 *header = uncached(mailbox[14] + id * 128);
-			u32 pad = (0U - request[9] - 8) & 3;
-			amsdu_prefix(header + 26, uncached(request[8]), request[9]);
-			for (u32 i = 0; i < pad; i++) header[48 + i] = 0;
-			amsdu_prefix(header + 48 + pad, uncached(request[10]), request[11]);
-			/* Both BIDs remain owned until the MPDU's RPQ. Their old NI/Ethernet
-			 * headers provide space for new prefixes; the payloads stay in place. */
-			header_copy(uncached(request[8] - 34), header, 48);
-			header_copy(uncached(request[10] - 8 - pad), header + 48, 22 + pad);
+			/* Each BID remains owned until the aggregate's RPQ completion.
+			 * Reuse NI/Ethernet header space; payloads stay in place. */
 			used = 64;
-			address(page + used, request[8] - 34, request[9] + 34, 0); used += 6;
-			address(page + used, request[10] - 8 - pad, request[11] + 8 + pad, 1); used += 6;
-			count = 2; mailbox[57]++;
+			u32 pad = 0;
+			for (u32 n = 0; n < ni_frames; n++) {
+				u32 input = request[8 + n * 2], bytes = request[9 + n * 2];
+				amsdu_prefix(header + 26, uncached(input), bytes);
+				for (u32 i = 0; i < pad; i++) header[48 + i] = 0;
+				u32 output = input - (n ? 8 + pad : 34);
+				if (!n) header_copy(uncached(output), header, 48);
+				else {
+					header_copy(uncached(output), header + 48, pad);
+					header_copy(uncached(output + pad), header + 26, 22);
+				}
+				address(page + used, output, bytes + (n ? 8 + pad : 34), n + 1 == ni_frames);
+				used += 6;
+				pad = (0U - bytes - 8) & 3;
+			}
+			count = ni_frames; mailbox[57]++;
 		} else if (ni_packet) {
 			u32 length = ((packet >> 16) & 63) + 8;
 			u32 output = request[8] + 14 - length;

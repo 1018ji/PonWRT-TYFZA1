@@ -1163,6 +1163,7 @@ static int rtl_ax_monitor_register(struct rtl_ax_ap *radio)
 	hw->sta_data_size = sizeof(struct rtl_ax_station);
 	ieee80211_hw_set(hw, RX_INCLUDES_FCS);
 	ieee80211_hw_set(hw, AMPDU_AGGREGATION);
+	ieee80211_hw_set(hw, SUPPORTS_AMSDU_IN_AMPDU);
 	/* RPQ releases individual MPDUs without the transmitted PPDU length. */
 	ieee80211_hw_set(hw, TX_STATUS_NO_AMPDU_LEN);
 	ieee80211_hw_set(hw, SUPPORT_FAST_XMIT);
@@ -1190,7 +1191,7 @@ static int rtl_ax_monitor_register(struct rtl_ax_ap *radio)
 	/* Board 2T2R is configured by the original normal-mode TRX tail.
 	 * Publish the implemented 20MHz HT TX/RX path; BA/AMPDU follows separately. */
 	radio->band.ht_cap.ht_supported = true;
-	radio->band.ht_cap.cap = IEEE80211_HT_CAP_SGI_20;
+	radio->band.ht_cap.cap = IEEE80211_HT_CAP_SGI_20 | IEEE80211_HT_CAP_MAX_AMSDU;
 	radio->band.ht_cap.ampdu_factor = IEEE80211_HT_MAX_AMPDU_64K;
 	radio->band.ht_cap.mcs.rx_mask[0] = 0xff;
 	radio->band.ht_cap.mcs.rx_mask[1] = 0xff;
@@ -1200,7 +1201,7 @@ static int rtl_ax_monitor_register(struct rtl_ax_ap *radio)
 		radio->band.ht_cap.cap |= IEEE80211_HT_CAP_SUP_WIDTH_20_40 | IEEE80211_HT_CAP_SGI_40;
 		radio->band.ht_cap.mcs.rx_highest = cpu_to_le16(300);
 		radio->band.vht_cap.vht_supported = true;
-		radio->band.vht_cap.cap = IEEE80211_VHT_CAP_SHORT_GI_80 |
+		radio->band.vht_cap.cap = IEEE80211_VHT_CAP_SHORT_GI_80 | IEEE80211_VHT_CAP_MAX_MPDU_LENGTH_11454 |
 			(IEEE80211_VHT_MAX_AMPDU_64K << IEEE80211_VHT_CAP_MAX_A_MPDU_LENGTH_EXPONENT_SHIFT);
 		/* Two streams MCS0..9; all higher NSS are unsupported. */
 		radio->band.vht_cap.vht_mcs.rx_mcs_map = cpu_to_le16(0xfffa);

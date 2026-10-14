@@ -41,13 +41,13 @@ static u32 __attribute__((section(".rxq"), noinline)) ni_ingest(volatile u32 *ma
 	u32 buffer = entry[0] & 0xffffff80, header, length = ni_length(entry, buffer, &header);
 	u8 *ethernet = uncached(buffer + 32 + header);
 	u32 id = 0, macid = 128, free_slot;
-	/* Allocate beside the scheduler cursor so recycled low IDs do not make
-	 * ni_select walk the whole uncached table for every new queue head. */
+	/* Allocation advances independently of the next queue to transmit. */
 	for (free_slot = 0; free_slot < 128; free_slot++) {
-		id = (mailbox[112] + free_slot) & 127;
+		id = (mailbox[166] + free_slot) & 127;
 		if (!owners[id * 2]) break;
 	}
 	if (free_slot == 128) return 0;
+	mailbox[166] = (id + 1) & 127;
 	if ((entry[0] & 0x50) == 0x50 && length >= 14 && length <= 2048 - 32 - header)
 		for (u32 peer = 1; peer < 128; peer++) {
 			if (!*(u32 *)(memory + NI_PEER_ROUTE + peer * 4)) continue;
@@ -131,20 +131,28 @@ static u32 __attribute__((section(".rxq"), noinline)) ni_select(volatile u32 *ma
 				ps[2] = ps[1]; mailbox[39]++;
 			} else {
 				ps[2] = ps[1];
-				u32 next = waiting[3] >> 8;
-				if (next && ((request[2] >> 16) & 63) == 26 && !(request[3] & BIT(19))) {
-					u32 other = next - 1;
-					u32 *second = (void *)(memory + NI_WAIT + other * 16);
-					u32 pad = (0U - waiting[1] - 8) & 3;
-					if (waiting[1] + second[1] + 16 + pad <= (caps >> 18)) {
-						request[4] |= BIT(21);
-						request[2] = BIT(25) | 26U << 16 | (26 + waiting[1] + second[1] + 16 + pad);
-						request[10] = second[0]; request[11] = second[1];
-						owners[id * 2 + 1] = (owners[id * 2 + 1] & ~BIT(15)) | other << 24;
-						waiting[3] = (waiting[3] & 7) | (second[3] & ~7U);
-						second[0] = 0;
-						frames = 2;
+				u32 next = waiting[3] >> 8, tail_id = id;
+				u32 body = waiting[1] + 8;
+				if (((request[2] >> 16) & 63) == 26 && !(request[3] & BIT(19))) {
+					while (next && frames < 8) {
+						u32 other = next - 1;
+						u32 *part = (void *)(memory + NI_WAIT + other * 16);
+						u32 pad = (0U - body) & 3;
+						if (body + pad + part[1] + 8 > (caps >> 18)) break;
+						request[8 + frames * 2] = part[0];
+						request[9 + frames * 2] = part[1];
+						body += pad + part[1] + 8;
+						owners[tail_id * 2 + 1] = (owners[tail_id * 2 + 1] & ~BIT(15)) | other << 24;
+						tail_id = other;
+						next = part[3] >> 8;
+						part[0] = 0;
+						frames++;
 					}
+				}
+				if (frames > 1) {
+					request[4] |= BIT(21);
+					request[2] = frames << 24 | 26U << 16 | (26 + body);
+					waiting[3] = (waiting[3] & 7) | next << 8;
 				}
 			}
 		}
