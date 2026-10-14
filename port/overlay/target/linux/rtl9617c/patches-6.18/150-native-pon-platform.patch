@@ -1,6 +1,6 @@
 --- a/drivers/net/ethernet/realtek/Kconfig
 +++ b/drivers/net/ethernet/realtek/Kconfig
-@@ -1,5 +1,17 @@
+@@ -1,5 +1,18 @@
  # SPDX-License-Identifier: GPL-2.0-only
  
 +config RTL9617C_BOSA
@@ -12,6 +12,7 @@
 +	tristate "RTL9617C native PON MAC platform"
 +	depends on OF && ARCH_RTL9617C && RTL9617C_XRAM_ETH && RTL9617C_BOSA
 +	select FW_LOADER
++	select CRYPTO_CMAC
 +	help
 +	  Native Taurus SerDes, optical front-end, EPON MAC and PON networking.
 +

@@ -195,6 +195,8 @@ static irqreturn_t rtl_mpcp_irq_thread(int irq, void *data)
 			writel(BIT(3), pon->mac + GLB_IRQ);
 		} else if (pon->mode == RTL_PON_GPON) {
 			rtl_pon_gpon_irq(pon);
+		} else {
+			rtl_pon_xgpon_irq(pon);
 		}
 	}
 	writel(pending & PON_TOP_EVENTS, pon->top_irq);

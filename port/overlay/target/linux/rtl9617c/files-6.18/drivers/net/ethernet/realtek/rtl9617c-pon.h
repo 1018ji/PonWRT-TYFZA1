@@ -84,6 +84,14 @@ struct rtl9617c_pon {
 	bool xgpon_identity_configured;
 	u32 xgpon_pending_status;
 	bool xgpon_pending_valid;
+	bool xgpon_enabled, xgpon_omcc_ready, xgpon_key_ready;
+	u8 xgpon_last_state, xgpon_tag[8];
+	u16 xgpon_omcc_id;
+	u32 xgpon_last_irq;
+	u64 xgpon_irq_count;
+	int xgpon_activation_error;
+	struct crypto_shash *omci_cmac, *omci_kdf;
+	spinlock_t omci_key_lock;
 };
 
 void rtl_pon_update(void __iomem *reg, u32 mask, u32 value);
@@ -100,6 +108,10 @@ ssize_t rtl_pon_gpon_identity(struct rtl9617c_pon *pon, const char *buf, size_t 
 int rtl_pon_gpon_prepare_locked(struct rtl9617c_pon *pon);
 ssize_t rtl_pon_xgpon_identity(struct rtl9617c_pon *pon, const char *buf, size_t count);
 int rtl_pon_xgpon_prepare_locked(struct rtl9617c_pon *pon);
+int rtl_pon_xgpon_activation_locked(struct rtl9617c_pon *pon, bool enable);
+void rtl_pon_xgpon_stop_locked(struct rtl9617c_pon *pon);
+void rtl_pon_xgpon_irq(struct rtl9617c_pon *pon);
+int rtl_pon_xgpon_omci_key(struct rtl9617c_pon *pon, const u8 tag[8]);
 int rtl_pon_gpon_activation_locked(struct rtl9617c_pon *pon, bool enable);
 void rtl_pon_gpon_stop_locked(struct rtl9617c_pon *pon);
 void rtl_pon_gpon_irq(struct rtl9617c_pon *pon);

@@ -7,6 +7,13 @@
 #define RTL_XGPON_PLOAM_BYTES 48
 #define RTL_XGPON_PLOAM_TX_BYTES 40
 
+static inline void rtl_xgpon_active(const struct rtl_dq_io *io, int enabled, int symmetric)
+{
+	/* Stock aal_pon_mac_enable_set: GPON family mode minus GPON is 1 or 2. */
+	io->write(io->context, 0x4004, (io->read(io->context, 0x4004) & ~3U) |
+		(enabled ? symmetric ? 2U : 1U : 0));
+}
+
 static inline unsigned int rtl_xgpon_be32(const unsigned char *data)
 {
 	return (unsigned int)data[0] << 24 | (unsigned int)data[1] << 16 |

@@ -59,6 +59,7 @@ int rtl_pon_gpon_prepare_locked(struct rtl9617c_pon *pon)
 	lockdep_assert_held(&pon->control_lock);
 	gpiod_set_value_cansleep(pon->tx_disable, 1);
 	rtl_pon_gpon_stop_locked(pon);
+	rtl_pon_xgpon_stop_locked(pon);
 	rtl_pon_mpcp_stop_locked(pon);
 	mutex_lock(&pon->lock);
 	pon->mac_prepared = false;

@@ -46,10 +46,8 @@ configure_link() {
 		printf '1\n' > "$device/mac" || return $?
 		printf '1\n' > "$device/puc" || return $?
 		printf '1\n' > "$device/pdc" || return $?
-		if [ "$mode" = gpon ]; then
-			ip link set pon-omci up || return $?
-			printf '1\n' > "$device/activation" || return $?
-		fi
+		ip link set pon-omci up || return $?
+		printf '1\n' > "$device/activation" || return $?
 		offload
 		return $?
 	fi

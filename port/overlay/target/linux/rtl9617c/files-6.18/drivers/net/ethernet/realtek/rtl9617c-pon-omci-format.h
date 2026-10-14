@@ -5,6 +5,28 @@
 #define RTL_OMCI_PREFIX_BYTES 16
 #define RTL_OMCI_MAX_BODY 1980
 
+/* Original ca_generate_msk -> ca_generate_sk -> ca_generate_omci_ik. */
+static inline int rtl_omci_derive_key(void *context,
+	int (*cmac)(void *, const unsigned char *, const unsigned char *, unsigned int, unsigned char *),
+	const unsigned char serial[8], const unsigned char registration[36],
+	const unsigned char tag[8], unsigned char result[16])
+{
+	unsigned char root[16], msk[16], session[16], message[24];
+	static const unsigned char label[16] = "OMCIIntegrityKey";
+	unsigned int i;
+	int ret;
+
+	for (i = 0; i < 16; i++) root[i] = 0x55;
+	ret = cmac(context, root, registration, 36, msk);
+	if (ret) return ret;
+	for (i = 0; i < 8; i++) { message[i] = serial[i]; message[i + 8] = tag[i]; }
+	for (i = 0; i < 8; i++) message[i + 16] = "SessionK"[i];
+	ret = cmac(context, msk, message, 24, session);
+	if (!ret) ret = cmac(context, session, label, 16, result);
+	for (i = 0; i < 16; i++) { msk[i] = 0; session[i] = 0; }
+	return ret;
+}
+
 /* Userspace supplies the OMCI body; the transport appends CRC/MIC. */
 static inline unsigned int rtl_omci_body_length(const unsigned char *data,
 					       unsigned int length)

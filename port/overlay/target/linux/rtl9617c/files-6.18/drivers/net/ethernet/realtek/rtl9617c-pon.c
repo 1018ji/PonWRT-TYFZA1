@@ -128,6 +128,7 @@ static ssize_t bosa_store(struct device *dev, struct device_attribute *attr,
 		return -EINVAL;
 	mutex_lock(&pon->control_lock);
 	rtl_pon_gpon_stop_locked(pon);
+	rtl_pon_xgpon_stop_locked(pon);
 	rtl_pon_epon_traffic_locked(pon, false);
 	rtl_pon_mpcp_stop_locked(pon);
 	ret = rtl9617c_bosa_prepare(pon->bosa_dev);
@@ -224,6 +225,14 @@ static ssize_t activation_show(struct device *dev, struct device_attribute *attr
 	ssize_t size;
 
 	mutex_lock(&pon->lock);
+	if (pon->mode == RTL_PON_XGPON || pon->mode == RTL_PON_XGSPON) {
+		size = sysfs_emit(buf, "enabled=%u omcc=%u omcc_onu_id=%u omcc_gem=%u error=%d irq_count=%llu last_irq=%08x key_ready=%u\n",
+			pon->xgpon_enabled, pon->xgpon_omcc_ready, pon->xgpon_omcc_id,
+			pon->xgpon_omcc_id, pon->xgpon_activation_error, pon->xgpon_irq_count,
+			pon->xgpon_last_irq, pon->xgpon_key_ready);
+		mutex_unlock(&pon->lock);
+		return size;
+	}
 	size = sysfs_emit(buf,
 		"enabled=%u omcc=%u omcc_onu_id=%u omcc_gem=%u ds_fec=%u error=%d irq_count=%llu last_irq=%08x key_switches=%llu\n",
 		pon->gpon_enabled, pon->gpon_omcc_ready, pon->gpon_omcc_onu_id,
@@ -243,7 +252,8 @@ static ssize_t activation_store(struct device *dev, struct device_attribute *att
 	if (ret)
 		return ret;
 	mutex_lock(&pon->control_lock);
-	ret = rtl_pon_gpon_activation_locked(pon, enable);
+	ret = pon->mode == RTL_PON_GPON ? rtl_pon_gpon_activation_locked(pon, enable) :
+		rtl_pon_xgpon_activation_locked(pon, enable);
 	mutex_unlock(&pon->control_lock);
 	return ret ? ret : count;
 }
@@ -741,6 +751,7 @@ static void rtl9617c_pon_remove(struct platform_device *pdev)
 
 	mutex_lock(&pon->control_lock);
 	rtl_pon_gpon_stop_locked(pon);
+	rtl_pon_xgpon_stop_locked(pon);
 	rtl_pon_epon_traffic_locked(pon, false);
 	rtl_pon_mpcp_stop_locked(pon);
 	rtl_pon_serdes_stop_work(pon);
