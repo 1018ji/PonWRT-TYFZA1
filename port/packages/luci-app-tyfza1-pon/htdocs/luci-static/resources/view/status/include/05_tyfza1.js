@@ -8,8 +8,8 @@ return baseclass.extend({
 	render: function(data) {
 		return E('div', { class: 'tyf-dashboard' }, [status.style(),
 			data ? E('div', { class: 'tyf-grid' }, [status.ponCard(data), status.offloadCard(data)]) :
-				E('p', { role: 'status' }, '光猫状态读取失败；请检查权限或 rpcd 服务。'),
-			E('a', { href: L.url('admin/status/tyfza1') }, '打开设备总览，查看端口、上网和无线状态 →')
+				E('p', { role: 'status' }, '状态读取失败，请刷新页面。'),
+			E('a', { href: L.url('admin/status/tyfza1') }, '设备总览 →')
 		]);
 	}
 });

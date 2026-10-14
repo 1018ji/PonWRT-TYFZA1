@@ -11,12 +11,12 @@ var ituModes = ['gpon', 'xgpon', 'xgspon'];
 function byteLimit(limit) {
 	return function(section, text) {
 		if (/[\x00-\x1f\x7f]/.test(text)) return '不能包含控制字符。';
-		return new TextEncoder().encode(text).length <= limit || '最多 ' + limit + ' 字节（中文等字符占多个字节）。';
+		return new TextEncoder().encode(text).length <= limit || '最多 ' + limit + ' 字节。';
 	};
 }
 
 function livePanel(data) {
-	return E('div', { class: 'tyf-grid' }, [status.ponCard(data), status.offloadCard(data)]);
+	return E('div', { class: 'tyf-grid' }, [status.ponCard(data, false), status.offloadCard(data)]);
 }
 
 function authentication(data) {
@@ -24,7 +24,7 @@ function authentication(data) {
 	var ports = data.oam_ports || [];
 	if (!/^epon/.test((data.serdes || {}).mode || ''))
 		return status.rows([['激活状态', status.value((data.mac || {}).activation)], ['ONU-ID', status.value((data.mac || {}).onu_id)]]);
-	if (!ports.length) return E('p', { class: 'tyf-note' }, '尚无 OAM 认证会话。PON 停用、未启动或守护进程不可用时不会显示认证成功。');
+	if (!ports.length) return E('p', { class: 'tyf-note' }, '暂无认证会话');
 	return E('div', { class: 'tyf-grid' }, ports.map(function(port) {
 		var accepted = port.live && port.registered && port.discovery_stable && port.auth_state === 'accepted';
 		var text = !port.live ? '会话已失效' : !port.registered ? '等待注册' :
@@ -51,24 +51,24 @@ return view.extend({
 		return Promise.all([uci.load('pon'), status.callStatus().catch(function() { return null; }), uci.load('firewall'), uci.load('network')]);
 	},
 	render: function(data) {
-		var m = new form.Map('pon', 'PON 配置', '认证参数均可留空。MAC、SN 和厂商标识留空时使用本机原厂身份；LOID 和认证密码留空时不配置。“保存并应用”会重新配置光链路。');
+		var m = new form.Map('pon', 'PON 配置', '应用光链路配置可能短暂中断上网。');
 		m.chain('firewall');
 		var s = m.section(form.NamedSection, 'pon', 'pon');
 		s.tab('link', '光链路');
 		s.tab('identity', '运营商认证');
 		s.tab('wan', '上网设置');
-		s.tab('advanced', '设备身份与高级');
+		s.tab('advanced', '高级设置');
 		var o = s.taboption('link', form.Flag, 'enabled', '启用光链路');
 		o.rmempty = false;
 		o = s.taboption('link', form.ListValue, 'mode', '线路协议');
 		Object.keys(status.modes).forEach(function(mode) { o.value(mode, status.modes[mode]); });
 		o.rmempty = false;
-		o.description = '须与上联 OLT 匹配，不自动探测。GPON / XG-PON / XGS-PON 仍需实线验收，不能将初始化或 O5 激活当作业务已可用。';
+		o.description = '选择运营商使用的线路协议。';
 		o = s.taboption('advanced', form.Value, 'llid_count', 'EPON 逻辑链路数');
 		o.datatype = 'range(1,32)';
 		o.default = '1';
 		o.retain = true;
-		o.description = '普通家庭线路通常为 1；仅按运营商要求调整。';
+		o.description = '通常为 1。';
 		eponModes.forEach(function(mode) { o.depends('mode', mode); });
 		o = s.taboption('identity', form.Value, 'onu_mac', 'ONU MAC 地址');
 		o.datatype = 'macaddr';
@@ -77,8 +77,7 @@ return view.extend({
 			!(parseInt(text.slice(0, 2), 16) & 1) && !/^00(?::00){5}$/.test(text) || '请输入非零的单播 MAC 地址，或留空使用原厂身份。';
 	};
 		o.retain = true;
-		o.placeholder = '留空使用本机原厂 MAC';
-		o.description = '填写后覆盖本机原厂身份，清空后恢复原厂身份。';
+		o.placeholder = '留空使用原厂 MAC';
 		[
 			['loid', 'LOID', 24, false, eponModes.concat(ituModes)],
 			['loid_password', 'LOID 密码', 12, true, eponModes.concat(ituModes)],
@@ -95,10 +94,11 @@ return view.extend({
 			o.validate = byteLimit(field[2]);
 			o.password = field[3];
 			o.retain = true;
+			o.placeholder = index < 5 ? '选填' : '留空使用原厂值';
 			field[4].forEach(function(mode) { o.depends('mode', mode); });
 			if (field[0] === 'serial_number') {
 				o.placeholder = 'ABCD12345678';
-				o.description = '留空使用本机原厂 SN。格式：4 个 ASCII 厂商字符 + 8 位十六进制，或完整的 16 位十六进制。';
+				o.description = '留空使用原厂 SN；支持 12 字符 SN 或 16 位十六进制。';
 				o.validate = function(section, text) { return text === '' || /^(?:[\x20-\x7e]{4}[0-9a-fA-F]{8}|[0-9a-fA-F]{16})$/.test(text) || '请输入有效的 12 字符 SN 或 16 位十六进制 SN。'; };
 			}
 		});
@@ -119,12 +119,12 @@ return view.extend({
 		}
 		o = s.taboption('wan', form.DummyValue, '_network_settings', '配置上网接口');
 		o.rawhtml = true;
-		o.description = '使用 OpenWrt 原生 WAN 接口设置 DHCP、PPPoE 账号密码、IPv6 和 VLAN。默认 WAN 设备为 pon-data0；需要业务 VLAN 时选择 pon-data0.VID。';
-		o.cfgvalue = function() { return E('a', { href: L.url('admin/network/network') }, '打开接口管理（WAN / LAN / IPv6 / VLAN / 桥接）'); };
+		o.description = '在接口管理中配置拨号、IPv6 和 VLAN。';
+		o.cfgvalue = function() { return E('a', { href: L.url('admin/network/network') }, '打开接口管理 →'); };
 		var defaults = uci.sections('firewall', 'defaults')[0];
 		if (defaults) {
 			o = s.taboption('advanced', form.Flag, 'hardware_offload', '启用硬件流量卸载');
-			o.description = '使用现有防火墙卸载设置。启用时同时打开软件流量卸载；驱动实际状态见页面顶部。';
+			o.description = '同时启用软件流量卸载。';
 			o.uciconfig = 'firewall';
 			o.ucisection = defaults['.name'];
 			o.ucioption = 'flow_offloading_hw';
@@ -134,28 +134,27 @@ return view.extend({
 				if (enabled === '1') uci.set('firewall', defaults['.name'], 'flow_offloading', '1');
 			};
 		}
-		var error = E('p', { class: 'alert-message warning', role: 'status', hidden: !!data[1] }, '实时状态读取失败；配置表单仍可使用。');
+		var error = E('p', { class: 'alert-message warning', role: 'status', hidden: !!data[1] }, '状态读取失败，请刷新页面。');
 		var live = E('div', {}, data[1] ? livePanel(data[1]) : null);
 		var auth = E('div', {}, data[1] ? authentication(data[1]) : null);
-		var raw = E('pre', {}, data[1] ? diagnostics(data[1]) : '尚无实时数据');
-		var updated = E('p', { class: 'tyf-note' }, '每 5 秒更新状态，不会覆盖正在编辑的表单。');
+		var raw = E('pre', {}, data[1] ? diagnostics(data[1]) : '暂无数据');
+		var updated = E('p', { class: 'tyf-note' }, '每 5 秒自动刷新');
 		poll.add(function() {
 			return status.callStatus().then(function(next) {
 				error.hidden = true;
 				live.replaceChildren(livePanel(next));
 				auth.replaceChildren(authentication(next));
 				raw.textContent = diagnostics(next);
-				updated.textContent = '状态更新于 ' + new Date().toLocaleTimeString() + ' · 每 5 秒刷新';
+				updated.textContent = '更新于 ' + new Date().toLocaleTimeString();
 			}, function() {
 				error.hidden = false;
-				error.textContent = '状态刷新失败，下面保留的是上次数据，并非当前状态。请检查连接或重新登录。';
+				error.textContent = '刷新失败，显示上次数据。';
 			});
 		}, 5);
 		return m.render().then(function(form) {
 			return E('div', { class: 'tyf-dashboard' }, [status.style(), E('h2', {}, 'PON 管理'), error, live, updated, form,
-				E('h3', { class: 'tyf-section-title' }, '注册与认证会话'), auth,
-				E('details', { class: 'tyf-diagnostics' }, [E('summary', {}, '高级诊断（只读）'),
-					E('p', { class: 'tyf-note' }, '供排障使用的驱动原始状态。未提供的字段不会推算为正常值。'), raw])]);
+				E('h3', { class: 'tyf-section-title' }, '认证状态'), auth,
+				E('details', { class: 'tyf-diagnostics' }, [E('summary', {}, '高级诊断'), raw])]);
 		});
 	}
 });
