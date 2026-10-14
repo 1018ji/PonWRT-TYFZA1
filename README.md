@@ -65,19 +65,14 @@ sysupgrade /tmp/sysupgrade.bin
 - **网络 → 接口 → WAN**：使用 OpenWrt 原生 DHCP/PPPoE、VLAN 和 IPv6 设置。默认业务设备为 `pon-data0`，VLAN 使用 `pon-data0.VID`。
 - **网络 → 无线**：设置名称、密码和国家/地区，然后启用无线。
 
-## 自动编译
+## Fork 云端编译
 
-推送 `v*` 标签或手动运行 **Actions → Build TYFZA1 firmware**，自动编译并将安装包、升级镜像和校验值上传到 Release。
+1. 点击仓库右上角 **Fork**，然后进入自己的仓库。
+2. 打开 **Actions**，启用工作流。
+3. 选择 **Build TYFZA1 firmware → Run workflow**，选择分支，保留默认 `release_tag` 或填写新的版本标签，点击运行。
+4. 编译成功后，在自己仓库的 **Releases** 下载固件，或在本次 Actions 运行的 **Artifacts** 中下载 `firmware-and-build-log`。
 
-使用固定的 OpenWrt 和 feeds 版本。通用运行时输入位于首次 alpha 的 `tyfza1-runtime-inputs-v1.tar.gz` 附件；FIT 签名使用仓库 Secret `TYFZA1_FIT_SIGNING_KEY`。Fork 构建需配置与设备启动链匹配的密钥。
-
-本地 Linux 构建：解压运行时输入，设置 `TYFZA1_RUNTIME_INPUTS` 和 `TYFZA1_SIGNING_KEYS` 后执行：
-
-```sh
-sh port/scripts/prepare.sh sources/openwrt
-sh port/scripts/build.sh sources/openwrt "$(nproc)"
-sh scripts/package_release.sh sources/openwrt artifacts/release
-```
+密钥和编译所需附件会自动获取，无需配置 Secrets。
 
 ## 协议
 

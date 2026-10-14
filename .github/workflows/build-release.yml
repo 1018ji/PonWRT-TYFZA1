@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: Release tag to build
+        description: Release tag for build output
         required: true
         default: v0.1.0-alpha
 
@@ -46,12 +46,18 @@ jobs:
           FIT_SIGNING_KEY: ${{ secrets.TYFZA1_FIT_SIGNING_KEY }}
         run: |
           mkdir -p artifacts/runtime-inputs artifacts/signing
-          gh release download v0.1.0-alpha --repo "$GITHUB_REPOSITORY" \
+          gh release download v0.1.0-alpha --repo LeoooChen/PonWRT-TYFZA1 \
             --pattern tyfza1-runtime-inputs-v1.tar.gz --dir artifacts
           tar -xzf artifacts/tyfza1-runtime-inputs-v1.tar.gz -C artifacts/runtime-inputs
           umask 077
-          test -n "$FIT_SIGNING_KEY"
-          printf '%s\n' "$FIT_SIGNING_KEY" > artifacts/signing/dev.key
+          if [ -n "$FIT_SIGNING_KEY" ]; then
+            printf '%s\n' "$FIT_SIGNING_KEY" > artifacts/signing/dev.key
+          else
+            curl --fail --location --retry 3 --connect-timeout 15 --max-time 60 \
+              https://raw.githubusercontent.com/jameywine/GPL-for-GP3000/5090fbcb6ba743dd7b1314811ef557bad0460147/bootloader/Verified_Boot/verifed_key_06-04-2020/dev.key \
+              --output artifacts/signing/dev.key
+            echo 'bea80932793531fe263f62bf4de3ee95754ea7b9766eda23a418c22f06ce127f  artifacts/signing/dev.key' | sha256sum -c -
+          fi
           openssl req -new -x509 -key artifacts/signing/dev.key \
             -out artifacts/signing/dev.crt -subj /CN=TYFZA1-FIT -days 3650
       - name: Build OpenWrt and native PE
