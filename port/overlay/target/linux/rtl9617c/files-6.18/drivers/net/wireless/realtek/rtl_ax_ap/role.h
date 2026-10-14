@@ -59,6 +59,41 @@ static inline void rtl_ax_station_cmac_connected(unsigned char out[68],
 	}
 }
 
+static inline u8 rtl_ax_he_padding(const u8 *phy, const u8 *ppe, unsigned int nss)
+{
+	u8 ru_mask, padding = 0x55;
+	unsigned int stream, bw, position = 7;
+
+	if (!(phy[6] & IEEE80211_HE_PHY_CAP6_PPE_THRESHOLD_PRESENT))
+		return (phy[9] >> IEEE80211_HE_PHY_CAP9_NOMINAL_PKT_PADDING_POS) * 0x55;
+	ru_mask = (ppe[0] >> 3) & 15;
+	/* Original PPE parser stores zero for omitted RUs; CCTL maps it to 8us. */
+	for (stream = 0; stream <= (ppe[0] & 7); stream++)
+		for (bw = 0; bw < 4; bw++) {
+			unsigned int shift, value, pad;
+
+			if (!(ru_mask & BIT(bw))) continue;
+			shift = position & 7;
+			value = ppe[position / 8] >> shift;
+			if (shift > 2) value |= ppe[position / 8 + 1] << (8 - shift);
+			position += 6;
+			if (stream + 1 != nss) continue;
+			pad = ((value >> 3) & 7) != 7 ? 1 : (value & 7) != 7 ? 2 : 0;
+			padding = (padding & ~(3U << (bw * 2))) | pad << (bw * 2);
+		}
+	if ((ru_mask & 12) == 4)
+		padding = (padding & 63) | ((padding >> 4) & 3) << 6;
+	return padding;
+}
+
+static inline void rtl_ax_station_cmac_he(u8 out[68], u8 padding)
+{
+	/* Original CCTL V1: HE BSR format in word6, four padding fields in word7. */
+	rtl_ax_store32(out + 24, rtl_ax_ap_read32(out + 24) | BIT(13));
+	rtl_ax_store32(out + 56, rtl_ax_ap_read32(out + 56) | BIT(13));
+	rtl_ax_store32(out + 28, (rtl_ax_ap_read32(out + 28) & ~0xffU) | padding);
+}
+
 static inline void rtl_ax_peer_cam(unsigned char out[60], unsigned int macid,
 	const u8 *self, const u8 *peer, unsigned int aid, bool valid)
 {

@@ -151,6 +151,7 @@ static int rtl_ax_ap_start(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
 		rtl_ax_update32(&radio->io, 0xc400, BIT(12), 0);
 		return ret;
 	}
+	rtl_ax_port0_color(&radio->io, conf->he_bss_color.enabled ? conf->he_bss_color.color : 0);
 	rtl_ax_receive_mode(&radio->io, 4);
 	rtl_ax_update32(&radio->io, 0xc400, BIT(12), BIT(12));
 	WRITE_ONCE(radio->ap_started, true);
@@ -257,6 +258,8 @@ static void rtl_ax_ap_changed(struct ieee80211_hw *hw, struct ieee80211_vif *vif
 	}
 	if (!radio->ap_started)
 		return;
+	if (changed & BSS_CHANGED_HE_BSS_COLOR)
+		rtl_ax_port0_color(&radio->io, conf->he_bss_color.enabled ? conf->he_bss_color.color : 0);
 	if (changed & BSS_CHANGED_BEACON) {
 		radio->ap_result = rtl_ax_ap_template(hw, vif, conf);
 		if (radio->ap_result)
@@ -375,6 +378,8 @@ static int rtl_ax_tx_ba_finish(struct rtl_ax_ap *radio, unsigned int macid, unsi
 	for (i = 0; i < IEEE80211_NUM_TIDS; i++)
 		aggregate = max_t(unsigned int, aggregate, radio->tx_ba[macid].aggregation[i]);
 	rtl_ax_station_cmac_connected(cmac, macid, radio->chip == RTL_AX_8852C, aggregate);
+	/* BA changes retain the peer's negotiated HE packet-extension padding. */
+	rtl_ax_store32(cmac + 60, rtl_ax_ap_read32(cmac + 60) & ~0xffU);
 	if (radio->ra_registered[macid])
 		rtl_ax_store32(cmac + 36, rtl_ax_ap_read32(cmac + 36) & ~0x1ffU);
 	if (!aggregate)
@@ -482,7 +487,7 @@ static int rtl_ax_station_add(struct ieee80211_hw *hw, struct ieee80211_vif *vif
 	ret = rtl_ax_station_tables(radio, id);
 	if (ret)
 		goto remove;
-	ret = rtl_ax_station_connected_table(radio, id);
+	ret = rtl_ax_station_connected_table(radio, id, sta);
 	if (ret)
 		goto remove;
 	/* Original connect transition: self AP_CLIENT2, AP3, legacy TF padding1. */
@@ -496,7 +501,25 @@ static int rtl_ax_station_add(struct ieee80211_hw *hw, struct ieee80211_vif *vif
 		goto remove;
 	rtl_ax_tx_peer_qos(radio->tx, id, sta->wme);
 	rtl_ax_rx_uapsd(radio->rx, id, sta->uapsd_queues);
-	if (radio->chip == RTL_AX_8852C && sta->deflink.vht_cap.vht_supported) {
+	if (sta->deflink.he_cap.has_he) {
+		const struct ieee80211_sta_he_cap *he = &sta->deflink.he_cap;
+		bool band5g = radio->chip == RTL_AX_8852C;
+		u8 bandwidth = min_t(unsigned int, radio->channel.bandwidth, sta->deflink.bandwidth);
+		u32 caps = BIT(17) | min_t(unsigned int, sta->cur->max_amsdu_len, 7935) << 18;
+		bool ldpc = he->he_cap_elem.phy_cap_info[1] & IEEE80211_HE_PHY_CAP1_LDPC_CODING_IN_PAYLOAD;
+
+		rtl_ax_ra_he(radio->ra_config[id], id, sta->deflink.supp_rates[radio->band.band] << (band5g ? 4 : 0),
+			le16_to_cpu(he->he_mcs_nss_supp.rx_mcs_80), he->he_cap_elem.phy_cap_info[1],
+			he->he_cap_elem.phy_cap_info[7], band5g, bandwidth);
+		ret = rtl_ax_command_flags(radio, RTL_AX_H2C_LONG_DATA, 2, 1, 0,
+			radio->ra_config[id], 16, false, false);
+		if (ret) goto remove;
+		radio->ra_registered[id] = true;
+		radio->ra_rssi_samples[id] = 0;
+		radio->ra_reports[id] = 0;
+		memset(radio->ra_feedback[id], 0, 8);
+		rtl_ax_tx_peer_rate(radio->tx, id, 0x180 | bandwidth << 16 | (ldpc ? BIT(21) : 0), caps);
+	} else if (radio->chip == RTL_AX_8852C && sta->deflink.vht_cap.vht_supported) {
 		u16 ht = sta->deflink.ht_cap.mcs.rx_mask[0] | sta->deflink.ht_cap.mcs.rx_mask[1] << 8;
 		bool sgi = sta->deflink.vht_cap.cap & IEEE80211_VHT_CAP_SHORT_GI_80;
 		u32 caps = ht | (sgi ? BIT(16) : 0) | BIT(17) |
@@ -581,6 +604,7 @@ static int rtl_ax_ampdu_action(struct ieee80211_hw *hw, struct ieee80211_vif *vi
 		rtl_ax_update8(&radio->io, 0xc604, 7, 0);
 		rtl_ax_update32(&radio->io, 0xc610, 0xff0000ff, 0xa500003f);
 		rtl_ax_station_cmac_connected(cmac, station->macid, radio->chip == RTL_AX_8852C, aggregate);
+		rtl_ax_store32(cmac + 60, rtl_ax_ap_read32(cmac + 60) & ~0xffU);
 		/* The stock VW_NO_WDINFO default must not overwrite firmware RA. */
 		if (radio->ra_registered[station->macid])
 			rtl_ax_store32(cmac + 36, rtl_ax_ap_read32(cmac + 36) & ~0x1ffU);
@@ -877,7 +901,8 @@ static void rtl_ax_sta_rate_update(struct ieee80211_hw *hw, struct ieee80211_vif
 	struct ieee80211_sta_rates *rates;
 	u32 rate, caps;
 
-	if (!station->macid) return;
+	/* Firmware RA owns these peers; a Minstrel HT update loses HE/LDPC state. */
+	if (!station->macid || radio->ra_registered[station->macid]) return;
 	rcu_read_lock();
 	rates = rcu_dereference(sta->rates);
 	if (rates && (rates->rate[0].flags & IEEE80211_TX_RC_MCS)) {
@@ -886,8 +911,7 @@ static void rtl_ax_sta_rate_update(struct ieee80211_hw *hw, struct ieee80211_vif
 		caps = sta->deflink.ht_cap.mcs.rx_mask[0] | sta->deflink.ht_cap.mcs.rx_mask[1] << 8;
 		if (sta->deflink.ht_cap.cap & IEEE80211_HT_CAP_SGI_20) caps |= BIT(16);
 		unsigned int amsdu = sta->cur->max_amsdu_len;
-		if (radio->ra_registered[station->macid]) caps |= BIT(17);
-		else if (sta->cur->max_rc_amsdu_len) amsdu = min(amsdu, sta->cur->max_rc_amsdu_len);
+		if (sta->cur->max_rc_amsdu_len) amsdu = min(amsdu, sta->cur->max_rc_amsdu_len);
 		caps |= min(amsdu, 7935U) << 18;
 		rtl_ax_tx_peer_rate(radio->tx, station->macid, rate, caps);
 	}
@@ -956,7 +980,15 @@ static void rtl_ax_sta_statistics(struct ieee80211_hw *hw, struct ieee80211_vif 
 	if (!reports || (feedback[4] & BIT(7))) return;
 	memset(&info->txrate, 0, sizeof(info->txrate));
 	info->txrate.bw = bandwidths[(feedback[5] >> 5) & 3];
-	if ((feedback[5] & 3) == 2) {
+	if ((feedback[5] & 3) == 3) {
+		u8 giltf = (feedback[5] >> 2) & 7;
+
+		info->txrate.flags = RATE_INFO_FLAGS_HE_MCS;
+		info->txrate.mcs = feedback[4] & 15;
+		info->txrate.nss = ((feedback[4] >> 4) & 7) + 1;
+		info->txrate.he_gi = giltf == 1 || giltf == 3 || giltf == 5 ? NL80211_RATE_INFO_HE_GI_0_8 :
+			giltf == 2 || giltf == 4 ? NL80211_RATE_INFO_HE_GI_1_6 : NL80211_RATE_INFO_HE_GI_3_2;
+	} else if ((feedback[5] & 3) == 2) {
 		info->txrate.flags = RATE_INFO_FLAGS_VHT_MCS;
 		info->txrate.mcs = feedback[4] & 15;
 		info->txrate.nss = ((feedback[4] >> 4) & 7) + 1;
@@ -964,7 +996,8 @@ static void rtl_ax_sta_statistics(struct ieee80211_hw *hw, struct ieee80211_vif 
 		info->txrate.flags = RATE_INFO_FLAGS_MCS;
 		info->txrate.mcs = feedback[4] & 127;
 	} else return;
-	if ((feedback[5] >> 2) & 7) info->txrate.flags |= RATE_INFO_FLAGS_SHORT_GI;
+	if ((feedback[5] & 3) != 3 && ((feedback[5] >> 2) & 7))
+		info->txrate.flags |= RATE_INFO_FLAGS_SHORT_GI;
 	info->filled |= BIT_ULL(NL80211_STA_INFO_TX_BITRATE);
 }
 
@@ -1209,6 +1242,22 @@ static int rtl_ax_monitor_register(struct rtl_ax_ap *radio)
 		radio->band.vht_cap.vht_mcs.rx_highest = cpu_to_le16(867);
 		radio->band.vht_cap.vht_mcs.tx_highest = cpu_to_le16(867);
 	}
+	radio->he_band.types_mask = BIT(NL80211_IFTYPE_AP);
+	radio->he_band.he_cap.has_he = true;
+	radio->he_band.he_cap.he_cap_elem.mac_cap_info[0] = IEEE80211_HE_MAC_CAP0_HTC_HE;
+	radio->he_band.he_cap.he_cap_elem.mac_cap_info[4] = IEEE80211_HE_MAC_CAP4_AMSDU_IN_AMPDU;
+	radio->he_band.he_cap.he_cap_elem.phy_cap_info[0] = band == NL80211_BAND_5GHZ ?
+		IEEE80211_HE_PHY_CAP0_CHANNEL_WIDTH_SET_40MHZ_80MHZ_IN_5G : 0;
+	radio->he_band.he_cap.he_cap_elem.phy_cap_info[1] = IEEE80211_HE_PHY_CAP1_LDPC_CODING_IN_PAYLOAD |
+		IEEE80211_HE_PHY_CAP1_HE_LTF_AND_GI_FOR_HE_PPDUS_0_8US;
+	radio->he_band.he_cap.he_cap_elem.phy_cap_info[7] = IEEE80211_HE_PHY_CAP7_HE_SU_MU_PPDU_4XLTF_AND_08_US_GI;
+	radio->he_band.he_cap.he_mcs_nss_supp.rx_mcs_80 = cpu_to_le16(0xfffa);
+	radio->he_band.he_cap.he_mcs_nss_supp.tx_mcs_80 = cpu_to_le16(0xfffa);
+	radio->he_band.he_cap.he_mcs_nss_supp.rx_mcs_160 = cpu_to_le16(0xffff);
+	radio->he_band.he_cap.he_mcs_nss_supp.tx_mcs_160 = cpu_to_le16(0xffff);
+	radio->he_band.he_cap.he_mcs_nss_supp.rx_mcs_80p80 = cpu_to_le16(0xffff);
+	radio->he_band.he_cap.he_mcs_nss_supp.tx_mcs_80p80 = cpu_to_le16(0xffff);
+	_ieee80211_set_sband_iftype_data(&radio->band, &radio->he_band, 1);
 	hw->wiphy->bands[band] = &radio->band;
 	radio->hw = hw;
 	spin_lock_init(&radio->pn_lock);

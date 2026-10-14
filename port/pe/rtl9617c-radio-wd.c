@@ -464,7 +464,9 @@ void pe_main(volatile u32 *control)
 		word(page + 16, dw4); word(page + 20, dw5);
 		word(page + 28, (rate & BIT(20) ? 0 : BIT(31)) | ((rate >> 16) & 3) << 28 |
 			((rate >> 12) & 7) << 25 | (rate & 0x1ff) << 16);
-		word(page + 32, BIT(9) | BIT(10));
+		/* Original DATA metadata enables fallback for firmware-selected rates. */
+		word(page + 32, (rate & BIT(20) ? 0 : BIT(9) | BIT(10)) |
+			(rate & BIT(21) ? BIT(11) : 0));
 		word(page + 36, ((flags & BIT(14)) ? BIT(11) : 0) | (aggregate ? (aggregate - 1) & 255 : 0));
 		word(page + 40, dw10);
 		if (flags & BIT(17)) {

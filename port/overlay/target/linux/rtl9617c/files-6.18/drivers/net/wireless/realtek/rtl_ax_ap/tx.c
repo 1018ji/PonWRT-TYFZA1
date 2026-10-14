@@ -518,6 +518,7 @@ int rtl_ax_tx_submit(struct rtl_ax_tx *tx, struct ieee80211_hw *hw,
 		request[2] = packet_bytes | header_bytes << 16 | segments << 24;
 		tx->pe_ethernet += encap;
 		request[3] = rate | gi << 12 | bandwidth << 16;
+		if (encap) request[3] |= tx->peer_rates[macid] & BIT(21);
 		if (encap && (get_unaligned_le32(tx->pe.memory + 0xe200 + macid * 4) & BIT(17)))
 			request[3] |= BIT(20);
 		request[4] = request_flags; request[5] = aggregate | density << 8 | key;

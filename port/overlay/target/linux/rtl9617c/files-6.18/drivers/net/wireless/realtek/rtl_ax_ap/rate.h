@@ -72,4 +72,30 @@ static inline void rtl_ax_ra_vht80(u8 command[16], u8 macid, u16 legacy, u16 mcs
 	command[13] = 0x38;
 	command[15] = 0x20; /* 5 GHz, original 8852C report format. */
 }
+static inline void rtl_ax_ra_he(u8 command[16], u8 macid, u16 legacy, u16 mcs,
+	u8 phy1, u8 phy7, bool band5g, u8 bandwidth)
+{
+	u64 mask = (legacy & (band5g ? 0x10 : 0x15)) | BIT_ULL(63);
+	u8 streams = 0;
+	unsigned int i;
+	/* RA byte3 carries optional GI/LTF capability bits, not a PHY rate enum. */
+	u8 giltf_caps = phy7 & IEEE80211_HE_PHY_CAP7_HE_SU_MU_PPDU_4XLTF_AND_08_US_GI ? 1 :
+		phy1 & IEEE80211_HE_PHY_CAP1_HE_LTF_AND_GI_FOR_HE_PPDUS_0_8US ? 2 : 0;
+
+	for (i = 0; i < 2; i++) {
+		unsigned int cap = (mcs >> (i * 2)) & 3;
+		if (cap == 3) continue;
+		mask |= ((1ULL << (8 + cap * 2)) - 1) << (12 + i * 12);
+		streams = i;
+	}
+	memset(command, 0, 16);
+	/* Original mode mapping: OFDM2/HE16, plus CCK1 on 2G; BW in bits7:6. */
+	command[0] = (band5g ? 0x24 : 0x26) | bandwidth << 6;
+	command[1] = macid;
+	command[2] = 0x10 | (phy1 & IEEE80211_HE_PHY_CAP1_LDPC_CODING_IN_PAYLOAD ? 0x40 : 0);
+	command[3] = streams | giltf_caps << 3;
+	put_unaligned_le64(mask, command + 4);
+	command[13] = 0x38;
+	command[15] = band5g ? 0x20 : 0x80;
+}
 #endif

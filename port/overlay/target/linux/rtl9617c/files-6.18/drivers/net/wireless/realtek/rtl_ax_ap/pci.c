@@ -128,6 +128,7 @@ struct rtl_ax_ap {
 	struct rtl_ax_tx *tx;
 	struct ieee80211_hw *hw;
 	struct ieee80211_supported_band band;
+	struct ieee80211_sband_iftype_data he_band;
 	struct ieee80211_channel channels[13];
 	struct ieee80211_rate rates[12];
 	bool monitor_started;
@@ -538,11 +539,15 @@ static int rtl_ax_station_tables(struct rtl_ax_ap *radio, unsigned int macid)
 	return rtl_ax_command(radio, RTL_AX_H2C_DATA, 1, 5, 9, dmac, sizeof(dmac), true);
 }
 
-static int rtl_ax_station_connected_table(struct rtl_ax_ap *radio, unsigned int macid)
+static int rtl_ax_station_connected_table(struct rtl_ax_ap *radio, unsigned int macid,
+	struct ieee80211_sta *sta)
 {
 	u8 cmac[68];
 
 	rtl_ax_station_cmac_connected(cmac, macid, radio->chip == RTL_AX_8852C, 0);
+	if (sta->deflink.he_cap.has_he)
+		rtl_ax_station_cmac_he(cmac, rtl_ax_he_padding(sta->deflink.he_cap.he_cap_elem.phy_cap_info,
+			sta->deflink.he_cap.ppe_thres, min_t(unsigned int, sta->deflink.rx_nss, 2)));
 	return rtl_ax_command(radio, RTL_AX_H2C_DATA, 1, 5, 2, cmac, sizeof(cmac), true);
 }
 
