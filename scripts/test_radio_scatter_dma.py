@@ -48,7 +48,7 @@ mapping = r'''
 struct scatterlist {unsigned int length;dma_addr_t dma;};
 struct sk_buff {bool nonlinear;unsigned int len,count,lengths[11];u8 *data;};
 struct pci_dev {int dev;};
-struct rtl_ax_tx {struct pci_dev *pdev;};
+struct rtl_ax_tx {struct pci_dev *pdev;int *dma_device;};
 struct rtl_ax_tx_mapping {struct scatterlist sg[RTL_AX_TX_WP_ADDRESS_MAX];unsigned int count,dma_count;};
 struct rtl_ax_tx_slot {dma_addr_t dma;unsigned int bytes;struct rtl_ax_tx_mapping *mapping;};
 static unsigned int allocated,mapped,linearized,unmapped_count;
@@ -86,14 +86,14 @@ static void dma_unmap_single(int *dev,dma_addr_t dma,unsigned int n,int directio
 mapping += function('rtl_ax_tx_unmap') + function('rtl_ax_tx_map')
 mapping += r'''
 int main(void){
- struct pci_dev pci={};struct rtl_ax_tx tx={.pdev=&pci};u8 data[16384]={};
+ struct pci_dev pci={};struct rtl_ax_tx tx={.pdev=&pci,.dma_device=&pci.dev};u8 data[16384]={};
  for(unsigned int scenario=0;scenario<7;scenario++){
   struct sk_buff skb={.nonlinear=scenario!=0,.len=6000,.count=4,.lengths={1500,1500,1500,1500},.data=data};
   struct rtl_ax_tx_slot slot={.bytes=skb.len};bool compact=false;
   merge=scenario==2;fail_alloc=scenario==5;fail_map=scenario==6;
   if(scenario==3){skb.count=10;for(unsigned int i=0;i<10;i++)skb.lengths[i]=i<5?2048:100;skb.len=10740;slot.bytes=skb.len;}
   if(scenario==4)skb.count=11;
-  int result=rtl_ax_tx_map(&tx,&skb,&slot,&compact);
+  int result=rtl_ax_tx_map(&tx,&skb,&slot,&compact,false);
   if(scenario>=5){assert(result==-ENOMEM && !allocated && !mapped);continue;}
   assert(result==(scenario==1?4:scenario==3?6:3));
   assert(compact==(scenario==3 || scenario==4));
@@ -104,6 +104,15 @@ int main(void){
   if(scenario==1 || scenario==2)assert(unmapped_count==4);
  }
  assert(linearized==2);puts("Scatter DMA ownership: original vs merged nents, WP overflow compaction, failed mapping and RPQ slot reuse passed");
+ fail_alloc=false;fail_map=false;merge=false;
+ for(unsigned count=9;count<=10;count++){
+  struct sk_buff skb={.nonlinear=true,.len=count*100,.count=count,.data=data};
+  for(unsigned i=0;i<count;i++)skb.lengths[i]=100;
+  struct rtl_ax_tx_slot slot={.bytes=skb.len};bool compact=false;
+  assert(rtl_ax_tx_map(&tx,&skb,&slot,&compact,true)==(count==9?9:1));
+  assert(compact==(count==10));rtl_ax_tx_unmap(&tx,&slot);
+  assert(!mapped && !allocated);
+ }
 }
 '''
 with tempfile.TemporaryDirectory(dir=root / 'artifacts', prefix='radio-scatter-') as directory:

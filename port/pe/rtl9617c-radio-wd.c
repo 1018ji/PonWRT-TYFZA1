@@ -205,6 +205,14 @@ static void ni_recycle(volatile u32 *mailbox, u8 *memory)
 		    !(ni[mailbox[116] / 4] & BIT(31))) return;
 		sync();
 		ni[mailbox[116] / 4 + 1] = owners[id * 2] | mailbox[117];
+#ifdef PE_UPLINK
+		u32 macid = (owners[id * 2 + 1] >> 8) & 127;
+		if (macid) {
+			u32 tid = *(u32 *)(memory + NI_WAIT + id * 16 + 12) & 7;
+			memory[NI_TID_PENDING + macid * 8 + tid]--;
+			ni_peer_event(mailbox, memory, macid);
+		}
+#endif
 		owners[id * 2 + 1] = owners[id * 2] = 0;
 		mailbox[29]++; mailbox[30]--;
 		if (dropped) mailbox[47] = 0;
@@ -365,6 +373,26 @@ void pe_main(volatile u32 *control)
 		u32 sequence = flags & 0xfff;
 
 		for (u32 i = 0; i < 128; i += 4) word(page + i, 0);
+		if (flags & BIT(22)) {
+			/* Original normal and shortcut TX share sta->txseq_tid[]. */
+			u32 macid = flags >> 24, tid = flags & 7;
+			u32 header_bytes = (packet >> 16) & 63;
+			u8 *header = uncached(mailbox[14] + id * 128);
+			u32 *sequences = (void *)(memory +
+#ifdef PE_UPLINK
+				0x10000
+#else
+				0x3000
+#endif
+			);
+			sequence = sequences[macid * 8 + tid];
+			sequences[macid * 8 + tid] = (sequence + 1) & 0xfff;
+			header_copy(header, uncached(request[8]), header_bytes);
+			header[22] = sequence << 4;
+			header[23] = sequence >> 4;
+			address(page + used, mailbox[14] + id * 128, header_bytes, 0);
+			used += 6; count++;
+		}
 		if (flags & BIT(18)) {
 			u32 macid = flags >> 24, tid = flags & 7;
 			u32 header_bytes = (packet >> 16) & 63;
@@ -434,6 +462,10 @@ void pe_main(volatile u32 *control)
 			u32 address = request[8 + segment * 2];
 			u32 bytes = request[9 + segment * 2];
 			if (!segment && flags & BIT(18)) { address += 14; bytes -= 14; }
+			if (!segment && flags & BIT(22)) {
+				u32 header_bytes = (packet >> 16) & 63;
+				address += header_bytes; bytes -= header_bytes;
+			}
 			while (bytes) {
 				u32 length = bytes > 2047 ? 2047 : bytes;
 				u32 last = segment + 1 == segments && bytes == length;

@@ -470,11 +470,12 @@ static int rtl_ax_command_flags(struct rtl_ax_ap *radio, unsigned int buffer_cla
 	unsigned int category, unsigned int class, unsigned int function,
 	const void *data, unsigned int bytes, bool receive_ack, bool done_ack)
 {
-	unsigned int slot;
+	unsigned int slot, sequence;
 	unsigned long flags;
 	int length, ret;
 
 	mutex_lock(&radio->command_mutex);
+	sequence = radio->command_sequence;
 	slot = buffer_class * RTL_AX_H2C_CLASS_BUFFERS + radio->h2c_available[buffer_class];
 	length = rtl_ax_command_packet(radio->h2c_packet + slot * RTL_AX_H2C_BUFFER_BYTES,
 				       RTL_AX_H2C_BUFFER_BYTES, data, bytes, category, class,
@@ -510,6 +511,20 @@ static int rtl_ax_command_flags(struct rtl_ax_ap *radio, unsigned int buffer_cla
 		spin_lock_irqsave(&radio->command_lock, flags);
 		radio->command_pending = false;
 		spin_unlock_irqrestore(&radio->command_lock, flags);
+	}
+	if (ret == -ETIMEDOUT) {
+		dev_err(&radio->pdev->dev,
+			"H2C timeout category=%u class=%u function=%u sequence=%u ACK=%u/%u TXBD=%08x RXQ=%08x RPQ=%08x\n",
+			category, class, function, sequence, receive_ack, done_ack,
+			rtl_ax_read32(radio, RTL_AX_H2C_INDEX), rtl_ax_read32(radio, 0x1218),
+			rtl_ax_read32(radio, 0x121c));
+		/* Same error registers read by the original mac_dump_err_status. */
+		dev_err(&radio->pdev->dev,
+			"DMA state SER=%08x DMAC=%08x CMAC=%08x HAXI=%08x WDE=%08x PLE=%08x HFC=%08x WCPU=%02x\n",
+			rtl_ax_read32(radio, 0x8424), rtl_ax_read32(radio, 0x8524),
+			rtl_ax_read32(radio, 0xc164), rtl_ax_read32(radio, 0x10bc),
+			rtl_ax_read32(radio, 0x8c34), rtl_ax_read32(radio, 0x9034),
+			rtl_ax_read32(radio, 0x1700), rtl_ax_read8(radio, RTL_AX_WCPU_CONTROL));
 	}
 unlock:
 	mutex_unlock(&radio->command_mutex);

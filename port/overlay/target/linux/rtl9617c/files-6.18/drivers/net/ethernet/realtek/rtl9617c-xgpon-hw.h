@@ -71,6 +71,26 @@ static inline unsigned int rtl_xgpon_be32(const unsigned char *data)
 	       (unsigned int)data[2] << 8 | data[3];
 }
 
+/* Original xgpon_aes_ploam_ack_mic_update and aal_ploam_ack_ploam_no_msg_set. */
+static inline int rtl_xgpon_ack_no_message(const struct rtl_dq_io *io, void *context,
+	int (*cmac)(void *, const unsigned char *, const unsigned char *, unsigned int, unsigned char *),
+	const unsigned char key[16], unsigned int onu_id)
+{
+	unsigned char message[41] = {2}, mic[16];
+	int ret;
+
+	message[1] = onu_id >> 8;
+	message[2] = onu_id;
+	message[3] = 9;
+	message[5] = 1;
+	ret = cmac(context, key, message, sizeof(message), mic);
+	if (!ret) {
+		io->write(io->context, 0x4a64, rtl_xgpon_be32(mic + 4));
+		io->write(io->context, 0x4a68, rtl_xgpon_be32(mic));
+	}
+	return ret;
+}
+
 static inline void rtl_xgpon_identity(const struct rtl_dq_io *io,
 				     const unsigned char serial[8],
 				     const unsigned char registration[36])

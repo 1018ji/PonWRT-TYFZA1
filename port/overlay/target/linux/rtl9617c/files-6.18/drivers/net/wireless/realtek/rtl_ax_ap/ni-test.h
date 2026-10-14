@@ -32,38 +32,48 @@ static void ni_state_init(struct rtl_ax_tx *tx)
  INIT_WORK(&state->ps_work, ni_route_ps);
 }
 
-static void ni_test_buffered(struct rtl_ax_tx *tx, unsigned int macid, bool buffered)
+static void ni_test_buffered(struct rtl_ax_tx *tx, unsigned int macid, u16 tids)
 {
 	struct ieee80211_sta *sta;
 	unsigned int tid;
 	local_bh_disable(); rcu_read_lock();
 	sta = ieee80211_find_sta_by_ifaddr(tx->hw, tx->pe.memory + 0xe400 + macid * 8, NULL);
 	for (tid = 0; sta && tid < 8; tid++)
-		ieee80211_sta_set_buffered(sta, tid, buffered &&
-			get_unaligned_le32(tx->pe.memory + 0x13000 + (macid * 8 + tid) * 4));
+		ieee80211_sta_set_buffered(sta, tid, tids & BIT(tid));
 	rcu_read_unlock(); local_bh_enable();
 }
 
 static void ni_route_ps(struct work_struct *work)
 {
 	struct rtl_ax_tx *tx = container_of(work, struct rtl_ax_ni_state, ps_work)->tx;
-	unsigned int macid, tid;
+	u16 pending[128] = {};
+	unsigned int macid, tid, id;
+	unsigned long flags;
+
+	/* Original stop_sta_xmit includes num_pending_txreq in its TIM decision. */
+	spin_lock_irqsave(&tx->lock, flags);
+	for_each_set_bit(id, tx->pending, RTL_AX_TX_ENTRIES)
+		if (tx->slots[id].tid < 8)
+			pending[tx->slots[id].macid] |= BIT(tx->slots[id].tid);
+	spin_unlock_irqrestore(&tx->lock, flags);
 	for (macid = 1; macid < 128; macid++) {
 		u32 mask = 0;
-		if (!READ_ONCE(tx->ni.route_peers[macid])) continue;
-		if (READ_ONCE(tx->peer_asleep[macid]))
+		if (!READ_ONCE(tx->peer_authorized[macid]) && !READ_ONCE(tx->ni.route_tim[macid])) continue;
+		if (READ_ONCE(tx->peer_asleep[macid])) {
+			mask = pending[macid];
 			for (tid = 0; tid < 8; tid++)
-				if (get_unaligned_le32(tx->pe.memory + 0x13000 + (macid * 8 + tid) * 4)) mask |= BIT(tid);
-		if (mask != tx->ni.route_tim[macid]) {
-			ni_test_buffered(tx, macid, mask != 0);
-			tx->ni.route_tim[macid] = mask;
+				if (tx->pe_active && READ_ONCE(*(u8 *)(tx->pe.memory + 0x14200 + macid * 8 + tid))) mask |= BIT(tid);
+		}
+		if (mask != READ_ONCE(tx->ni.route_tim[macid])) {
+			ni_test_buffered(tx, macid, mask);
+			WRITE_ONCE(tx->ni.route_tim[macid], mask);
 		}
 	}
 }
 
 static void ni_route_sleep(struct rtl_ax_tx *tx, unsigned int macid)
 {
-	if (READ_ONCE(tx->ni.route_peers[macid])) schedule_work(&tx->ni.ps_work);
+	if (READ_ONCE(tx->peer_authorized[macid])) schedule_work(&tx->ni.ps_work);
 }
 
 static int ni_access(struct rtl_ax_tx *tx, unsigned int offset, u32 command)

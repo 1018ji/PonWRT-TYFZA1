@@ -7,8 +7,10 @@
 
 use std::collections::BTreeSet;
 
-/// Match value for untagged upstream frames and tagged frames after concrete VID lookup.
+/// Match any VLAN; the adjacent values distinguish tagged and untagged frames.
 pub const DATA_PATH_VLAN_ANY: u16 = u16::MAX;
+pub const DATA_PATH_VLAN_UNTAGGED: u16 = u16::MAX - 1;
+pub const DATA_PATH_VLAN_TAGGED: u16 = u16::MAX - 2;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DataPathCandidate {
@@ -16,6 +18,8 @@ pub struct DataPathCandidate {
     pub gem_id: u16,
     pub vlan_id: u16,
     pub pbit_mask: u8,
+    /// Downstream filtering is independent of upstream 802.1p GEM mapping.
+    pub downstream_pbits: u8,
     /// A Class 281 GEM carries downstream multicast traffic.
     pub multicast: bool,
 }

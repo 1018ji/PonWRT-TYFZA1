@@ -147,8 +147,8 @@ pub unsafe extern "C" fn tyfza1_omci_paths(agent: &Agent, output: *mut u8) -> i3
     let paths = agent.mib.provisioning_snapshot().data_paths;
     if paths.len() > 248 { return -28; }
     let graph = agent.mib.data_path_graph();
-    let mut bytes = Vec::with_capacity(4 + paths.len() * 12);
-    bytes.extend_from_slice(&1u16.to_le_bytes());
+    let mut bytes = Vec::with_capacity(4 + paths.len() * 13);
+    bytes.extend_from_slice(&2u16.to_le_bytes());
     bytes.extend_from_slice(&(paths.len() as u16).to_le_bytes());
     for path in paths {
         let mut tcont = 0;
@@ -176,6 +176,7 @@ pub unsafe extern "C" fn tyfza1_omci_paths(agent: &Agent, output: *mut u8) -> i3
         bytes.push(queue);
         bytes.push(encrypted);
         bytes.extend_from_slice(&tcont.to_le_bytes());
+        bytes.push(path.downstream_pbits);
     }
     std::ptr::copy_nonoverlapping(bytes.as_ptr(), output, bytes.len());
     bytes.len() as i32

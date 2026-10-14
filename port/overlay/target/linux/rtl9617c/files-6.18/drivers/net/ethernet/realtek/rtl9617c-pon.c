@@ -226,12 +226,13 @@ static ssize_t activation_show(struct device *dev, struct device_attribute *attr
 
 	mutex_lock(&pon->lock);
 	if (pon->mode == RTL_PON_XGPON || pon->mode == RTL_PON_XGSPON) {
-		size = sysfs_emit(buf, "enabled=%u omcc=%u omcc_onu_id=%u omcc_gem=%u error=%d irq_count=%llu last_irq=%08x key_ready=%u key_state=%u active_key=%u key_reports=%llu tk4=%llu tk5=%llu recovering=%u\n",
+		size = sysfs_emit(buf, "enabled=%u omcc=%u omcc_onu_id=%u omcc_gem=%u error=%d irq_count=%llu last_irq=%08x key_ready=%u key_state=%u active_key=%u key_reports=%llu tk4=%llu tk5=%llu recovering=%u last_events=%08x deactivations=%llu\n",
 			pon->xgpon_enabled, pon->xgpon_omcc_ready, pon->xgpon_omcc_id,
 			pon->xgpon_omcc_id, pon->xgpon_activation_error, pon->xgpon_irq_count,
 			pon->xgpon_last_irq, pon->xgpon_key_ready, pon->xgpon_key_state,
 			pon->xgpon_active_key + 1, pon->xgpon_key_reports, pon->xgpon_key_tk4,
-			pon->xgpon_key_tk5, pon->xgpon_recover);
+			pon->xgpon_key_tk5, pon->xgpon_recover, pon->xgpon_last_transitions,
+			pon->xgpon_deactivations);
 		mutex_unlock(&pon->lock);
 		return size;
 	}

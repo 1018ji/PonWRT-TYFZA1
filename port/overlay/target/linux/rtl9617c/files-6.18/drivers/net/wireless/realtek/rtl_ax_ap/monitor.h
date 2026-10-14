@@ -1234,8 +1234,9 @@ static int rtl_ax_monitor_register(struct rtl_ax_ap *radio)
 		radio->band.ht_cap.cap |= IEEE80211_HT_CAP_SUP_WIDTH_20_40 | IEEE80211_HT_CAP_SGI_40;
 		radio->band.ht_cap.mcs.rx_highest = cpu_to_le16(300);
 		radio->band.vht_cap.vht_supported = true;
-		radio->band.vht_cap.cap = IEEE80211_VHT_CAP_SHORT_GI_80 | IEEE80211_VHT_CAP_MAX_MPDU_LENGTH_11454 |
-			(IEEE80211_VHT_MAX_AMPDU_64K << IEEE80211_VHT_CAP_MAX_A_MPDU_LENGTH_EXPONENT_SHIFT);
+		/* Original VHT defaults: max MPDU code1, A-MPDU exponent7. */
+		radio->band.vht_cap.cap = IEEE80211_VHT_CAP_SHORT_GI_80 | IEEE80211_VHT_CAP_MAX_MPDU_LENGTH_7991 |
+			(IEEE80211_VHT_MAX_AMPDU_1024K << IEEE80211_VHT_CAP_MAX_A_MPDU_LENGTH_EXPONENT_SHIFT);
 		/* Two streams MCS0..9; all higher NSS are unsupported. */
 		radio->band.vht_cap.vht_mcs.rx_mcs_map = cpu_to_le16(0xfffa);
 		radio->band.vht_cap.vht_mcs.tx_mcs_map = cpu_to_le16(0xfffa);
@@ -1245,6 +1246,8 @@ static int rtl_ax_monitor_register(struct rtl_ax_ap *radio)
 	radio->he_band.types_mask = BIT(NL80211_IFTYPE_AP);
 	radio->he_band.he_cap.has_he = true;
 	radio->he_band.he_cap.he_cap_elem.mac_cap_info[0] = IEEE80211_HE_MAC_CAP0_HTC_HE;
+	/* Original rtw_build_he_mac_caps extends the A-MPDU exponent by2. */
+	radio->he_band.he_cap.he_cap_elem.mac_cap_info[3] = IEEE80211_HE_MAC_CAP3_MAX_AMPDU_LEN_EXP_EXT_2;
 	radio->he_band.he_cap.he_cap_elem.mac_cap_info[4] = IEEE80211_HE_MAC_CAP4_AMSDU_IN_AMPDU;
 	radio->he_band.he_cap.he_cap_elem.phy_cap_info[0] = band == NL80211_BAND_5GHZ ?
 		IEEE80211_HE_PHY_CAP0_CHANNEL_WIDTH_SET_40MHZ_80MHZ_IN_5G : 0;

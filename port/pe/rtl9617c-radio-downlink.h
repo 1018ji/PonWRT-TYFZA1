@@ -5,6 +5,7 @@
 #define NI_PEER_BA 0x12000
 #define NI_TID_QUEUED 0x13000
 #define NI_TIM_MASK 0x14000
+#define NI_TID_PENDING 0x14200
 #define NI_TID_HEAD 0x15000
 #define NI_TID_TAIL 0x16000
 #define NI_EPP_BYTES 4096
@@ -15,7 +16,7 @@ static void __attribute__((noinline)) ni_peer_event(volatile u32 *mailbox, u8 *m
 	u32 mask = 0;
 	if (*(u32 *)(memory + 0xe800 + macid * 16))
 		for (u32 tid = 0; tid < 8; tid++)
-			if (*(u32 *)(memory + NI_TID_QUEUED + (macid * 8 + tid) * 4)) mask |= BIT(tid);
+			if (memory[NI_TID_PENDING + macid * 8 + tid]) mask |= BIT(tid);
 	u32 *old = (void *)(memory + NI_TIM_MASK + macid * 4);
 	if (*old != mask) { *old = mask; pe_event(mailbox); }
 }
@@ -82,6 +83,7 @@ static u32 __attribute__((section(".rxq"), noinline)) ni_ingest(volatile u32 *ma
 		(*(u32 *)(memory + NI_PEER_QUEUED + macid * 4))++;
 		mailbox[38]++;
 		(*(u32 *)(memory + NI_TID_QUEUED + (macid * 8 + waiting[3]) * 4))++;
+		memory[NI_TID_PENDING + macid * 8 + waiting[3]]++;
 		ni_peer_event(mailbox, memory, macid);
 	}
 	consumer = (consumer + 8) & (NI_EPP_BYTES - 1);

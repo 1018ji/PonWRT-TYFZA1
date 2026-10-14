@@ -12,12 +12,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <syslog.h>
+#include <time.h>
 #include <unistd.h>
 #include "pon-config.h"
 #include "pon-omci.h"
 
 #define PON_SYSFS "/sys/bus/platform/devices/4f5500000.pon/"
-#define PATH_BYTES (4 + 248 * 12)
+#define PATH_BYTES (4 + 248 * 13)
 
 static int put_file(const char *path, const void *data, size_t length)
 {
@@ -96,6 +98,7 @@ int main(void)
 	int fd, enabled = 1, applied_length = 0, result, path_error = 0;
 	struct pollfd pollfd;
 
+	openlog("pon-omcid", LOG_PID, LOG_DAEMON);
 	result = load_identity(&identity);
 	if (result) { fprintf(stderr, "OMCI identity: %s\n", strerror(-result)); return 1; }
 	agent = tyfza1_omci_new(&identity);
@@ -128,7 +131,7 @@ int main(void)
 		FILE *status = fopen("/var/run/pon-omci", "w");
 		if (status) {
 			fprintf(status, "rx=%llu tx=%llu invalid=%llu paths=%u error=%d\n",
-				received, transmitted, invalid, applied_length > 4 ? (applied_length - 4) / 12 : 0, path_error);
+				received, transmitted, invalid, applied_length > 4 ? (applied_length - 4) / 13 : 0, path_error);
 			fclose(status);
 		}
 		result = poll(&pollfd, 1, 1000);
@@ -138,19 +141,35 @@ int main(void)
 		if (length < 0) { if (errno == EINTR || errno == ENETDOWN) continue; break; }
 		received++;
 		uint8_t broadcast[18];
+		bool security_set = length >= 12 && (input[2] & 31) == 8 && input[4] == 1 && input[5] == 0x4c;
+		unsigned int mask_offset = input[3] == 0x0b ? 10 : 8;
+		struct timespec security_received, security_replied;
 		int backend_result = 0;
+		if (security_set) clock_gettime(CLOCK_MONOTONIC, &security_received);
 		if (tyfza1_omci_broadcast(input, length, broadcast))
 			backend_result = put_file(PON_SYSFS "omci_broadcast", broadcast, sizeof(broadcast));
 		length = tyfza1_omci_dispatch(agent, input, length, output, backend_result);
 		if (length < 0) { invalid++; continue; }
 		result = send(fd, output, length, 0);
-		if (result < 0) { if (errno == ENETDOWN) continue; break; }
+		int send_error = result < 0 ? errno : 0;
+		if (security_set) {
+			clock_gettime(CLOCK_MONOTONIC, &security_replied);
+			syslog(LOG_INFO, "Class332 SET rx=%lld.%09ld tx=%lld.%09ld tid=%02x%02x mask=%02x%02x backend=%d response=%u sent=%d",
+				(long long)security_received.tv_sec, security_received.tv_nsec,
+				(long long)security_replied.tv_sec, security_replied.tv_nsec,
+				input[0], input[1], input[mask_offset], input[mask_offset + 1],
+				backend_result, output[output[3] == 0x0b ? 10 : 8], send_error ? -send_error : result);
+		}
+		if (result < 0) { if (send_error == ENETDOWN) continue; break; }
 		transmitted++;
 		/* The response uses the current IK; a completed Class332 exchange installs the next MSK. */
 		if (tyfza1_omci_session_key(agent, key)) {
 			char text[33];
 			for (unsigned int i = 0; i < 16; i++) snprintf(text + i * 2, 3, "%02x", key[i]);
 			result = put_file(PON_SYSFS "omci_msk", text, 32);
+			clock_gettime(CLOCK_MONOTONIC, &security_replied);
+			syslog(LOG_INFO, "Class332 MSK time=%lld.%09ld result=%d",
+				(long long)security_replied.tv_sec, security_replied.tv_nsec, result);
 			tyfza1_omci_key_complete(agent, !result);
 			memset(key, 0, sizeof(key));
 		}

@@ -34,6 +34,15 @@ static int rtl_omci_cmac(void *context, const u8 *key, const u8 *data, unsigned 
 	return ret;
 }
 
+int rtl_pon_xgpon_ack_update(struct rtl9617c_pon *pon)
+{
+	const struct rtl_dq_io io = {pon, key_read, key_write, NULL};
+
+	lockdep_assert_held(&pon->lock);
+	return rtl_xgpon_ack_no_message(&io, pon->omci_kdf, rtl_omci_cmac,
+		pon->xgpon_ploam_ik, readl(pon->mac + 0x412c) & 0xffff);
+}
+
 int rtl_pon_xgpon_omci_key(struct rtl9617c_pon *pon, const u8 tag[8])
 {
 	const struct rtl_dq_io io = {pon, key_read, key_write, NULL};
@@ -53,16 +62,19 @@ int rtl_pon_xgpon_omci_key(struct rtl9617c_pon *pon, const u8 tag[8])
 		pon->xgpon_registration, tag, pon->omci_master_key_valid ? pon->omci_master_key : NULL, session);
 	if (!ret) ret = rtl_omci_cmac(pon->omci_kdf, session, omci_label, 16, key);
 	if (!ret) ret = rtl_omci_cmac(pon->omci_kdf, session, kek_label, 16, pon->xgpon_kek);
+	if (!ret) ret = rtl_omci_cmac(pon->omci_kdf, session, ploam_label, 16, integrity);
 	if (!ret && pon->omci_master_key_valid) {
-		ret = rtl_omci_cmac(pon->omci_kdf, session, ploam_label, 16, integrity);
-		if (!ret) {
-			rtl_pon_update(pon->mac + 0x4e00, BIT(6), 0);
-			rtl_xgpon_key_words(&io, 0x4e14, pon->omci_master_key);
-			rtl_xgpon_key_words(&io, 0x4e24, session);
-			rtl_pon_update(pon->mac + 0x4e04, BIT(2), BIT(2));
-			rtl_xgpon_key_words(&io, 0x4e34, integrity);
-			rtl_pon_update(pon->mac + 0x4e04, BIT(3), BIT(3));
-		}
+		rtl_pon_update(pon->mac + 0x4e00, BIT(6), 0);
+		rtl_xgpon_key_words(&io, 0x4e14, pon->omci_master_key);
+		rtl_xgpon_key_words(&io, 0x4e24, session);
+		rtl_pon_update(pon->mac + 0x4e04, BIT(2), BIT(2));
+		rtl_xgpon_key_words(&io, 0x4e34, integrity);
+		rtl_pon_update(pon->mac + 0x4e04, BIT(3), BIT(3));
+	}
+	if (!ret) {
+		memcpy(pon->xgpon_ploam_ik, integrity, 16);
+		if (pon->xgpon_omcc_ready)
+			ret = rtl_pon_xgpon_ack_update(pon);
 	}
 	if (!ret) {
 		spin_lock_bh(&pon->omci_key_lock);

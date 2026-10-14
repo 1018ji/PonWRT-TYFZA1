@@ -174,7 +174,7 @@ static inline void rtl_fe_action_set(unsigned int words[RTL_FE_ACTION_WORDS],
  * directional flow. Indexed DA and egress interface supply Ethernet rewrite. */
 struct rtl_fe_vlan {
  unsigned short vid;
- unsigned char tpid, priority;
+ unsigned char tpid, priority, dei;
 };
 struct rtl_fe_ipv4_action {
  unsigned int address;
@@ -184,6 +184,7 @@ struct rtl_fe_ipv4_action {
  unsigned char vlan_set, vlan_count;
  unsigned char pppoe_pop, mtu_set, mtu_index;
  unsigned char gem_set, gem_index;
+ unsigned char bridge;
  struct rtl_fe_vlan vlan[2]; /* Outermost tag first; TPID hardware index+1. */
 };
 
@@ -199,13 +200,13 @@ static inline void rtl_fe_ipv4_action(unsigned int words[RTL_FE_ACTION_WORDS],
  rtl_fe_action_set(words, RTL_FE_PERMIT, 1);
  rtl_fe_action_set(words, RTL_FE_DEEPQ, action->deep_queue);
  rtl_fe_action_set(words, RTL_FE_MCGID, action->destination);
- rtl_fe_action_set(words, RTL_FE_L3_IF_VLD1, 1);
- rtl_fe_action_set(words, RTL_FE_SMAC_TRANS, 0); /* Egress interface supplies source MAC. */
+ rtl_fe_action_set(words, RTL_FE_L3_IF_VLD1, !action->bridge);
+ rtl_fe_action_set(words, RTL_FE_SMAC_TRANS, action->bridge); /* One preserves the original source MAC. */
  rtl_fe_action_set(words, RTL_FE_IGR_L3_IF_IDX1, action->ingress_interface);
  rtl_fe_action_set(words, RTL_FE_EGR_L3_IF_IDX1, action->egress_interface);
- rtl_fe_action_set(words, RTL_FE_IP_TTL_DEC1, 1);
- rtl_fe_action_set(words, RTL_FE_IP_TTL_ZERO_DISCARD_EN1, 1);
- rtl_fe_action_set(words, RTL_FE_MAC_DA_IDX_VLD, 1);
+ rtl_fe_action_set(words, RTL_FE_IP_TTL_DEC1, !action->bridge);
+ rtl_fe_action_set(words, RTL_FE_IP_TTL_ZERO_DISCARD_EN1, !action->bridge);
+ rtl_fe_action_set(words, RTL_FE_MAC_DA_IDX_VLD, !action->bridge);
  rtl_fe_action_set(words, RTL_FE_MAC_DA_IDX, action->mac_da_index);
  rtl_fe_action_set(words, RTL_FE_CHK_MSK_PTR1, action->check_mask);
  rtl_fe_action_set(words, RTL_FE_CACHE_CTRL1, 1); /* Original FC type0 action. */
@@ -233,6 +234,7 @@ static inline void rtl_fe_ipv4_action(unsigned int words[RTL_FE_ACTION_WORDS],
    rtl_fe_action_set(words,i?RTL_FE_INNER_TPID_ENC1:RTL_FE_TOP_TPID_ENC1,action->vlan[i].tpid);
    rtl_fe_action_set(words,i?RTL_FE_INNER_802_1P1:RTL_FE_TOP_802_1P1,action->vlan[i].priority);
    rtl_fe_action_set(words,i?RTL_FE_INNER_802_1P_UPDATE_EN:RTL_FE_TOP_802_1P_UPDATE_EN,1);
+   rtl_fe_action_set(words,i?RTL_FE_INNER_DEI1:RTL_FE_TOP_DEI1,action->vlan[i].dei);
   }
  }
 }
@@ -271,6 +273,7 @@ enum rtl_fe_key_field {
 	RTL_FE_KEY_CTRL_SET_ID,
 	RTL_FE_KEY_TABLE_ID,
 	RTL_FE_KEY_MDATA_BYTE,
+	RTL_FE_KEY_ETHERTYPE,
 	RTL_FE_KEY_FIELD_COUNT,
 };
 static const struct rtl_fe_field_layout rtl_fe_key_fields[RTL_FE_KEY_FIELD_COUNT] = {
@@ -306,6 +309,7 @@ static const struct rtl_fe_field_layout rtl_fe_key_fields[RTL_FE_KEY_FIELD_COUNT
 	[RTL_FE_KEY_CTRL_SET_ID] = {724, 4},
 	[RTL_FE_KEY_TABLE_ID] = {728, 4},
 	[RTL_FE_KEY_MDATA_BYTE] = {614, 8},
+	[RTL_FE_KEY_ETHERTYPE] = {481, 16},
 };
 
 static inline void rtl_fe_key_set(unsigned int words[RTL_FE_KEY_WORDS],
@@ -452,6 +456,45 @@ static inline void rtl_fe_ipv6_mask(unsigned int words[RTL_FE_MASK_WORDS])
 static inline void rtl_fe_wifi_mask(unsigned int words[RTL_FE_MASK_WORDS])
 {
  rtl_fe_bits_set(words,135,8,0);
+}
+
+/* Original generate_hash_mask/generate_hash_key use full SA/DA and VID.
+ * L3/L4 fields stay masked; the packet editor leaves their bytes untouched. */
+static inline void rtl_fe_bridge_mask(unsigned int words[RTL_FE_MASK_WORDS])
+{
+ unsigned int i;
+
+ for(i=0;i<7;i++)words[i]=~0U;
+ words[7]=0;
+ rtl_fe_bits_set(words,55,2,0); /* TTL mask selector zero ignores TTL. */
+ rtl_fe_bits_set(words,58,9,0); /* IP prefix length zero ignores the address. */
+ rtl_fe_bits_set(words,67,9,0);
+ rtl_fe_bits_set(words,89,1,0); /* PPPoE session */
+ rtl_fe_bits_set(words,91,1,0); /* PPPoE type */
+ rtl_fe_bits_set(words,94,2,0); /* inner VID/TPID */
+ rtl_fe_bits_set(words,98,3,0); /* outer VID/TPID and tag count */
+ rtl_fe_bits_set(words,109,7,0); /* EtherType and complete source MAC */
+ rtl_fe_bits_set(words,120,6,0); /* complete destination MAC */
+ rtl_fe_bits_set(words,201,1,0); /* disabled-policer LLID/GEM metadata */
+ rtl_fe_bits_set(words,216,1,0); /* logical source */
+}
+
+static inline void rtl_fe_bridge_key(unsigned int words[RTL_FE_KEY_WORDS],
+ const unsigned char source[6],const unsigned char destination[6],
+ unsigned int protocol,unsigned int ingress,unsigned int llid,unsigned int mask)
+{
+ unsigned int i;
+
+ for(i=0;i<RTL_FE_KEY_WORDS;i++)words[i]=0;
+ for(i=0;i<6;i++) {
+  rtl_fe_bits_set(words,497+(5-i)*8,8,source[i]);
+  rtl_fe_bits_set(words,552+(5-i)*8,8,destination[i]);
+ }
+ rtl_fe_key_set(words,RTL_FE_KEY_ETHERTYPE,protocol);
+ rtl_fe_key_set(words,RTL_FE_KEY_LSPID,ingress);
+ rtl_fe_key_set(words,RTL_FE_KEY_POL_ID,llid);
+ rtl_fe_key_set(words,RTL_FE_KEY_HKEY_ID,mask);
+ rtl_fe_key_set(words,RTL_FE_KEY_TABLE_ID,1);
 }
 
 #define RTL_FE_HEADER_WORDS 32

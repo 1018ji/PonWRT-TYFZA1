@@ -13,7 +13,7 @@ use super::protocol::{
 };
 use super::provisioning::{
     DataPathAttribute, DataPathCandidate, DataPathEntity, DataPathGraph, DataPathTableRow,
-    ProvisioningSnapshot, DATA_PATH_VLAN_ANY,
+    ProvisioningSnapshot, DATA_PATH_VLAN_ANY, DATA_PATH_VLAN_TAGGED, DATA_PATH_VLAN_UNTAGGED,
 };
 use super::schema::{self, AttributeAccess, AttributeKind, CreateSource, ManagedEntityOrigin};
 use super::security;
@@ -1198,6 +1198,7 @@ impl Mib {
                             gem_id,
                             vlan_id: DATA_PATH_VLAN_ANY,
                             pbit_mask: 0,
+                            downstream_pbits: u8::MAX,
                             multicast: false,
                         },
                     );
@@ -1228,6 +1229,7 @@ impl Mib {
                     gem_id,
                     vlan_id: DATA_PATH_VLAN_ANY,
                     pbit_mask: u8::MAX,
+                    downstream_pbits: u8::MAX,
                     multicast: true,
                 },
             );
@@ -1300,7 +1302,11 @@ impl Mib {
                     .and_then(|entity| entity.attributes.get(&1))
                     .and_then(|attr| be_u16(&attr.value))
                     .and_then(|ctp_entity| unicast_by_entity.get(&ctp_entity))
-                    .cloned()
+                    .map(|path| {
+                        let mut path = path.clone();
+                        path.pbit_mask = u8::MAX;
+                        path
+                    })
                     .into_iter()
                     .collect::<Vec<_>>(),
                 Some(6) => multicast_by_iwtp
@@ -1315,6 +1321,8 @@ impl Mib {
             }
         }
 
+        let bridged_multicast = bridge_paths.values().flatten()
+            .filter(|path| path.multicast).map(|path| path.gem_id).collect::<BTreeSet<_>>();
         /* A VLAN filter and the same-entity ANI bridge port select the GEM path together. */
         for (entity_id, paths) in bridge_paths {
             let Some(filter) = self.entities.get(&(CLASS_VLAN_TAGGING_FILTER, entity_id)) else {
@@ -1327,6 +1335,36 @@ impl Mib {
                 .and_then(|attr| attr.value.first())
                 .copied()
                 .unwrap_or(0);
+            /* The original VLAN rule generator normalizes Forward Operation first. */
+            let mode = match operation {
+                0x00 | 0x05 | 0x09 | 0x0d => 0,
+                0x01 => 1,
+                0x02 | 0x06 | 0x0a | 0x0e => 2,
+                0x03 | 0x0f | 0x1c => 3,
+                0x07 | 0x11 | 0x1e => 4,
+                0x0b | 0x13 | 0x20 => 5,
+                0x04 | 0x10 | 0x1d => 6,
+                0x08 | 0x12 | 0x1f => 7,
+                0x0c | 0x14 | 0x21 => 8,
+                _ => continue,
+            };
+            if mode <= 2 {
+                snapshot.data_paths.extend(paths.into_iter().map(|mut path| {
+                    path.vlan_id = match mode {
+                        1 => DATA_PATH_VLAN_UNTAGGED,
+                        2 => DATA_PATH_VLAN_TAGGED,
+                        _ => DATA_PATH_VLAN_ANY,
+                    };
+                    path
+                }));
+                continue;
+            }
+            if mode <= 5 {
+                snapshot.data_paths.extend(paths.iter().cloned().map(|mut path| {
+                    path.vlan_id = DATA_PATH_VLAN_UNTAGGED;
+                    path
+                }));
+            }
             let count = filter
                 .attributes
                 .get(&3)
@@ -1335,42 +1373,24 @@ impl Mib {
                 .unwrap_or(0)
                 .min(12) as usize;
             let Some(list) = filter.attributes.get(&1) else {
-                snapshot.data_paths.extend(paths);
                 continue;
             };
-            let before = snapshot.data_paths.len();
             for entry in list.value.chunks_exact(2).take(count) {
                 let tci = u16::from_be_bytes([entry[0], entry[1]]);
-                match operation {
-                    0x03 | 0x04 | 0x0f | 0x10 | 0x16 => {
-                        let vlan_id = tci & 0x0fff;
-                        if !(1..=4094).contains(&vlan_id) {
-                            continue;
-                        }
-                        for path in &paths {
-                            let mut path = path.clone();
-                            path.vlan_id = vlan_id;
-                            if path.pbit_mask == 0 {
-                                path.pbit_mask = u8::MAX;
-                            }
-                            snapshot.data_paths.push(path);
-                        }
+                for path in &paths {
+                    let mut path = path.clone();
+                    if matches!(mode, 3 | 5 | 6 | 8) {
+                        path.vlan_id = tci & 0x0fff;
+                        if path.vlan_id == 4095 { continue; }
+                    } else {
+                        path.vlan_id = DATA_PATH_VLAN_TAGGED;
                     }
-                    0x07 | 0x08 | 0x11 | 0x12 => {
-                        let pbit = ((tci >> 13) & 7) as u8;
-                        for path in &paths {
-                            if path.pbit_mask == 0 || path.pbit_mask & (1 << pbit) != 0 {
-                                let mut path = path.clone();
-                                path.pbit_mask = 1 << pbit;
-                                snapshot.data_paths.push(path);
-                            }
-                        }
+                    if matches!(mode, 4 | 5 | 7 | 8) {
+                        path.pbit_mask &= 1 << ((tci >> 13) & 7);
+                        path.downstream_pbits = 1 << ((tci >> 13) & 7);
                     }
-                    _ => {}
+                    snapshot.data_paths.push(path);
                 }
-            }
-            if snapshot.data_paths.len() == before {
-                snapshot.data_paths.extend(paths);
             }
         }
 
@@ -1379,7 +1399,7 @@ impl Mib {
          * paths preserve concrete VIDs; DATA_PATH_VLAN_ANY represents GEM-wide delivery.
          */
         for path in multicast_by_iwtp.into_values() {
-            if !snapshot
+            if !bridged_multicast.contains(&path.gem_id) && !snapshot
                 .data_paths
                 .iter()
                 .any(|current| current.multicast && current.gem_id == path.gem_id)
@@ -1424,6 +1444,7 @@ impl Mib {
                 path.alloc_id,
                 path.gem_id,
                 path.pbit_mask,
+                path.downstream_pbits,
             )
         });
         snapshot.data_paths.dedup();
@@ -1927,6 +1948,14 @@ mod tests {
                 gem_id: 4000,
                 vlan_id: 85,
                 pbit_mask: u8::MAX,
+                downstream_pbits: u8::MAX,
+                multicast: true,
+            }, DataPathCandidate {
+                alloc_id: u16::MAX,
+                gem_id: 4000,
+                vlan_id: DATA_PATH_VLAN_UNTAGGED,
+                pbit_mask: u8::MAX,
+                downstream_pbits: u8::MAX,
                 multicast: true,
             }]
         );

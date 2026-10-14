@@ -153,7 +153,7 @@ ssize_t rtl_pon_itu_paths_write(struct rtl9617c_pon *pon, const char *buf, size_
 	unsigned int i, j, entries, unique = 0;
 	int ret = 0;
 
-	if (count < 4 || get_unaligned_le16(buf) != 1) return -EINVAL;
+	if (count < 4 || get_unaligned_le16(buf) != 2) return -EINVAL;
 	entries = get_unaligned_le16(buf + 2);
 	if (entries > RTL_ITU_PATH_MAX || count != 4 + entries * RTL_ITU_PATH_WIRE_BYTES) return -EMSGSIZE;
 	state = kzalloc(sizeof(*state), GFP_KERNEL);
@@ -169,9 +169,10 @@ ssize_t rtl_pon_itu_paths_write(struct rtl9617c_pon *pon, const char *buf, size_
 		path->pbits = record[6]; path->multicast = record[7];
 		path->queue = record[8]; path->encrypted = record[9];
 		path->tcont = get_unaligned_le16(record + 10);
-		if ((path->vlan != 65535 && path->vlan > 4094) || path->multicast > 1 ||
+		path->downstream_pbits = record[12];
+		if ((path->vlan < RTL_ITU_VLAN_TAGGED && path->vlan > 4094) || path->multicast > 1 ||
 		    path->encrypted > 1 || path->queue > 7 || (!path->multicast &&
-		    (!path->pbits || !path->tcont || path->tcont > 31 || path->alloc_id > 16383))) {
+		    (!(path->pbits | path->downstream_pbits) || !path->tcont || path->tcont > 31 || path->alloc_id > 16383))) {
 			ret = -EINVAL; goto free;
 		}
 		path->index = 8 + unique;
@@ -245,9 +246,9 @@ ssize_t rtl_pon_itu_paths_state(struct rtl9617c_pon *pon, char *buf)
 	if (state) for (i = 0; i < state->paths.count && length < PAGE_SIZE - 100; i++) {
 		const struct rtl_itu_path *path = &state->paths.path[i];
 
-		length += sysfs_emit_at(buf, length, "gem=%u index=%u alloc=%u tcont=%u queue=%u vlan=%u pbits=%02x multicast=%u upstream_aes=%u\n",
+		length += sysfs_emit_at(buf, length, "gem=%u index=%u alloc=%u tcont=%u queue=%u vlan=%u pbits=%02x multicast=%u upstream_aes=%u downstream_pbits=%02x\n",
 			path->gem_id, path->index, path->alloc_id, path->tcont, path->queue,
-			path->vlan, path->pbits, path->multicast, path->encrypted);
+			path->vlan, path->pbits, path->multicast, path->encrypted, path->downstream_pbits);
 	}
 	return length;
 }
@@ -257,7 +258,7 @@ netdev_tx_t rtl_pon_itu_data_transmit(struct rtl9617c_pon *pon, struct sk_buff *
 	struct rtl_itu_path_state *state;
 	const struct rtl_itu_path *path;
 	struct rtl9617c_ni_frame frame = {.header_high = BIT(30), .header_low = (16 << 9) | BIT(29)};
-	u16 tci;
+	u16 tci = 0;
 	unsigned int vlan = 65535, priority = skb->priority & 7;
 	bool found = false;
 
@@ -286,10 +287,16 @@ void rtl_pon_itu_data_receive(struct rtl9617c_pon *pon, struct napi_struct *napi
 	struct net_device *dev = rcu_dereference(pon->data_devices[0]);
 	struct rtl_itu_path_state *state = rcu_dereference(pon->itu_paths);
 	unsigned int i, index = source >> 8;
+	unsigned int vlan = RTL_ITU_VLAN_ANY, priority = skb->priority & 7;
+	u16 tci = 0;
 
 	if ((source & 255) != 7 || !state || !READ_ONCE(pon->itu_paths_ready) ||
 	    !netif_running(dev) || !netif_carrier_ok(dev) || skb->len < ETH_HLEN) goto drop;
-	for (i = 0; i < state->paths.count; i++) if (state->paths.path[i].index == index) break;
+	if (!vlan_get_tag(skb, &tci)) { vlan = tci & VLAN_VID_MASK; priority = tci >> VLAN_PRIO_SHIFT; }
+	for (i = 0; i < state->paths.count; i++)
+		if (state->paths.path[i].index == index &&
+		    (state->paths.path[i].downstream_pbits & BIT(priority)) &&
+		    rtl_itu_path_matches(&state->paths.path[i], vlan)) break;
 	if (i == state->paths.count) goto drop;
 	dev->stats.rx_packets++;
 	dev->stats.rx_bytes += skb->len;

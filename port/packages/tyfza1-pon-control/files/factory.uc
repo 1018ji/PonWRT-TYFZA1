@@ -1,7 +1,7 @@
 #!/usr/bin/ucode
 // SPDX-License-Identifier: GPL-2.0-or-later
 'use strict';
-import { readfile, writefile, mkdir, chmod } from 'fs';
+import { readfile, writefile, mkdir, chmod, rename } from 'fs';
 
 const source = ARGV[0];
 const output = ARGV[1];
@@ -29,7 +29,8 @@ function save(path, data) {
 		directory += part + '/';
 		mkdir(directory);
 	}
-	if (writefile(full, data) != length(data)) die('Cannot write factory runtime: ' + path);
+	if (writefile(full + '.new', data) != length(data) || !rename(full + '.new', full))
+		die('Cannot write factory runtime: ' + path);
 }
 
 function hexbytes(text) {
@@ -42,11 +43,13 @@ function mac(text) {
 	return join(':', map(match(text, /../g), entry => entry[0]));
 }
 
-let calibration = readfile(source + '/rtkbosa_k.bin');
-if (length(calibration) != 1024) die('Factory BOSA calibration must be 1024 bytes');
-save('lib/firmware/realtek/rtl9617c/bosa-calibration.bin', calibration);
+function import_optical() {
+	const calibration = readfile(source + '/rtkbosa_k.bin');
+	if (calibration == null) die('Cannot read factory BOSA calibration');
+	save('lib/firmware/realtek/rtl9617c/bosa-calibration.bin', calibration);
+}
 
-for (let radio in [ ['rtl8852ce', 0], ['rtl8192xbe', 1] ]) {
+function import_radio(radio) {
 	let data = 'TYFC0003';
 	for (let key in ['HW_RX_GAINGAP_2G_CCK_AB', 'HW_RX_GAINGAP_2G_OFDM_AB',
 		'HW_RX_GAINGAP_5GL_AB', 'HW_RX_GAINGAP_5GM_AB', 'HW_RX_GAINGAP_5GH_AB'])
@@ -67,10 +70,10 @@ for (let radio in [ ['rtl8852ce', 0], ['rtl8192xbe', 1] ]) {
 	for (let seed in [0, int(slope[length(slope) - 1], 16)])
 		for (let width = 0; width < 4; width++)
 			for (let i = 0; i < 14; i++) data += chr(width == 1 ? 0 : seed);
-	if (length(data) != 284) die('Invalid factory radio calibration size');
 	save('lib/firmware/realtek/tyfza1/' + radio[0] + '/flash-calibration.bin', data);
 }
 
+function import_identity() {
 const start = index(cs, '<chain chainName="EPON_LLID_TBL">');
 if (start < 0) die('Missing factory EPON LLID identity');
 const remainder = substr(cs, start);
@@ -94,4 +97,31 @@ for (let key, value in identity)
 save('var/run/tyfza1-factory/pon_factory', config);
 chmod(output + '/var/run/tyfza1-factory', 0700);
 chmod(output + '/var/run/tyfza1-factory/pon_factory', 0600);
-print('Loaded this device\'s factory PON identity and optical/radio calibration\n');
+}
+
+let failed = false;
+// Each subsystem consumes its own original factory data.
+for (let radio in [ ['rtl8852ce', 0], ['rtl8192xbe', 1] ]) {
+	try {
+		import_radio(radio);
+		print('Loaded factory radio calibration: ' + radio[0] + '\n');
+	} catch (e) {
+		warn('Factory radio ' + radio[0] + ': ' + e.message + '\n');
+		failed = true;
+	}
+}
+try {
+	import_optical();
+	print('Loaded factory optical calibration\n');
+} catch (e) {
+	warn('Factory optical: ' + e.message + '\n');
+	failed = true;
+}
+try {
+	import_identity();
+	print('Loaded factory PON identity\n');
+} catch (e) {
+	warn('Factory PON identity: ' + e.message + '\n');
+	failed = true;
+}
+exit(failed ? 1 : 0);

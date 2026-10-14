@@ -21,7 +21,7 @@
 | XG-PON | 非对称 XGTC 激活、PLOAM、OMCI 和业务映射已接入；OLT 互通与硬件转发待测试 |
 | XGS-PON | 对称 XGTC 激活、PLOAM、OMCI 和业务映射已接入；OLT 互通与硬件转发待测试 |
 | PPPoE | 已接入 OpenWrt 原生配置；拨号、业务与硬件转发待测试 |
-| 桥接 | Linux 桥接已接入；透明桥接硬件学习入口待接入 |
+| 桥接 | 已接入 Linux 网桥自动学习、VLAN/QinQ 和二层硬件转发；实机待测试 |
 | IPv6 | 已加入 DHCPv6、RA 和原生页面；公网、前缀下发与硬件转发待测试 |
 | VLAN/QinQ、多 LLID、多业务 | 待测试 |
 | 冷启动、WiFi 停启、防火墙重载 | 0.1 系列已实测；本版本待测试 |

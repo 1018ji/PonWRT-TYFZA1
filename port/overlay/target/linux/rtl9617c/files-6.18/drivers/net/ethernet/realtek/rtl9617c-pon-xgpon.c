@@ -197,6 +197,10 @@ void rtl_pon_xgpon_irq(struct rtl9617c_pon *pon)
 	pon->xgpon_last_irq = global;
 	if (!pon->xgpon_enabled)
 		return;
+	if (transitions)
+		pon->xgpon_last_transitions = transitions;
+	if (transitions & BIT(11))
+		pon->xgpon_deactivations++;
 	status[0] = readl(pon->mac + 0x4b28);
 	status[1] = readl(pon->mac + 0x4b2c);
 	count = rtl_xgpon_ploam_order(status[0], status[1], order);
@@ -232,6 +236,10 @@ void rtl_pon_xgpon_irq(struct rtl9617c_pon *pon)
 		if (ret)
 			pon->xgpon_activation_error = ret;
 	}
+	if ((transitions & BIT(12)) && pon->xgpon_key_ready) {
+		ret = rtl_pon_xgpon_ack_update(pon);
+		if (ret) pon->xgpon_activation_error = ret;
+	}
 	if (plmp & (BIT(5) | BIT(6) | BIT(7)))
 		rtl_pon_xgpon_key_irq(pon, plmp, key_control);
 	state = readl(pon->mac + 0x4d30) & 7;
@@ -266,10 +274,11 @@ void rtl_pon_xgpon_irq(struct rtl9617c_pon *pon)
 		if (state == 3) pon->itu_line_epoch++;
 		schedule_delayed_work(&pon->xgpon_recovery_work, HZ);
 	}
-	if (state != pon->xgpon_last_state) {
-		dev_info(pon->dev, "%s ACTP %u -> %u ONU-ID=%u OMCC=%u error=%d\n",
+	if (state != pon->xgpon_last_state || (transitions & BIT(11))) {
+		dev_info(pon->dev, "%s ACTP %u -> %u ONU-ID=%u OMCC=%u error=%d events=%08x ploam_irq=%08x\n",
 			rtl_pon_mode_name(pon->mode), pon->xgpon_last_state, state,
-			pon->xgpon_omcc_id, pon->xgpon_omcc_ready, pon->xgpon_activation_error);
+			pon->xgpon_omcc_id, pon->xgpon_omcc_ready, pon->xgpon_activation_error,
+			transitions, plmp);
 		pon->xgpon_last_state = state;
 	}
 }

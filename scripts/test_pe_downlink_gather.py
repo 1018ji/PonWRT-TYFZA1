@@ -14,7 +14,7 @@ directory = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / 'artifacts/pe-rad
 binary = (directory / 'pe-tx.bin').read_bytes()
 
 
-def case(lengths, cap):
+def case(lengths, cap, from_epp=False):
     base, mb, pages, headers, payload, ring, bar, ni, reports = (
         0x04000000, 0x04002000, 0x05100000, 0x05200000, 0x06000000,
         0x05000000, 0x12000000, 0x10000000, 0x06200000)
@@ -41,8 +41,23 @@ def case(lengths, cap):
     put(base + 0x11a04, 1)
     put(base + 0x11804, len(lengths))
     put(base + 0x13020, len(lengths))
+    u.mem_write(base + 0x14208, bytes([len(lengths)]))
     put(base + 0x15020, 1)
     put(base + 0x16020, len(lengths))
+    if from_epp:
+        put(mb + 25 * 4, base + 0x18000)
+        put(mb + 114 * 4, 0x7060)
+        put(mb + 115 * 4, 0x7160)
+        put(mb + 30 * 4, 0)
+        put(mb + 38 * 4, 0)
+        put(base + 0x11804, 0)
+        put(base + 0x13020, 0)
+        put(base + 0x15020, 0)
+        put(base + 0x16020, 0)
+        u.mem_write(base + 0x14208, b'\x00')
+        u.mem_write(base + 0xe408, dst)
+        put(ni + 0x659c, 1 << 24)
+        put(ni + 0x7060, len(lengths) * 8)
     frames = []
     for n, length in enumerate(lengths):
         frame = dst + bytes([2, 3, 4, 5, 6, n]) + bytes.fromhex('0800')
@@ -50,10 +65,14 @@ def case(lengths, cap):
         frames.append(frame)
         at = payload + n * 2048
         u.mem_write(at + 48, frame)
-        put(base + 0xc400 + n * 8, at)
-        put(base + 0xc404 + n * 8, 1 << 8 | 7 << 17 | 1 << 15)
-        u.mem_write(base + 0x11000 + n * 16,
-                    struct.pack('<4I', at + 48, length, 1, (n + 2) << 8 if n + 1 < len(lengths) else 0))
+        if from_epp:
+            u.mem_write(at + 32, struct.pack('>II', 1 << 31, (length + 8) << 15) + bytes(8))
+            u.mem_write(base + 0x18000 + n * 8, struct.pack('<II', at | 0x50, length + 16))
+        else:
+            put(base + 0xc400 + n * 8, at)
+            put(base + 0xc404 + n * 8, 1 << 8 | 7 << 17 | 1 << 15)
+            u.mem_write(base + 0x11000 + n * 16,
+                        struct.pack('<4I', at + 48, length, 1, (n + 2) << 8 if n + 1 < len(lengths) else 0))
     submits, returns = [], []
     u.hook_add(UC_HOOK_MEM_WRITE, lambda uc, access, at, size, value, data:
                submits.append(value), begin=bar + 0x1058, end=bar + 0x1059)
@@ -64,6 +83,7 @@ def case(lengths, cap):
     u.emu_start(0xbfc00400, 0xbfc03ffc, count=100000)
     assert get(mb + 28 * 4) == len(lengths) and get(mb + 38 * 4) == 0
     assert get(mb + 30 * 4) == len(lengths) and not returns
+    assert bytes(u.mem_read(base + 0x14208, 1)) == bytes([len(lengths)])
     member = 0
     all_ids = []
     for slot in range(len(submits)):
@@ -114,14 +134,16 @@ def case(lengths, cap):
     u.emu_start(u.reg_read(UC_MIPS_REG_PC), 0xbfc03ffc, count=100000)
     assert returns == [payload + n * 2048 | 6 for n in range(len(lengths))]
     assert get(mb + 30 * 4) == 0 and get(mb + 29 * 4) == len(lengths)
+    assert bytes(u.mem_read(base + 0x14208, 1)) == b'\x00'
     for n, frame in enumerate(frames):
         assert bytes(u.mem_read(payload + n * 2048 + 62, len(frame) - 14)) == frame[14:]
         assert get(base + 0xc400 + n * 8) == 0
-    return {'lengths': lengths, 'cap': cap, 'MPDUs': len(submits)}
+    return {'lengths': lengths, 'cap': cap, 'MPDUs': len(submits), 'from_EPP': from_epp}
 
 
 rows = [case([64 + (n + pad) % 4 for n in range(count)], 7935)
         for count in range(2, 9) for pad in range(4)]
 rows += [case([1500] * 8, 7935), case([1500] * 8, 3839)]
+rows += [case([1514] * 8, 7935, True), case([64, 65, 66, 67], 7935, True)]
 print(json.dumps({'cases': rows, 'exact_headers_payload_padding_DMA': True,
                   'ownership_until_RPQ_and_EQ_credit': True}, indent=2))

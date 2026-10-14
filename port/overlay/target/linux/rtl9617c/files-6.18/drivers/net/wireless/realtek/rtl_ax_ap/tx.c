@@ -44,7 +44,7 @@ struct rtl_ax_tx_slot {
 	u8 ring;
 	u8 key_index;
 	u8 macid, tid;
-	bool encrypted;
+	bool encrypted, pe_sequence;
 	struct rtl_ax_tx_mapping *mapping;
 };
 
@@ -312,7 +312,7 @@ static void rtl_ax_tx_unmap(struct rtl_ax_tx *tx, const struct rtl_ax_tx_slot *s
 }
 
 static int rtl_ax_tx_map(struct rtl_ax_tx *tx, struct sk_buff *skb,
-	struct rtl_ax_tx_slot *slot, bool *linearized)
+	struct rtl_ax_tx_slot *slot, bool *linearized, bool separate_header)
 {
 	struct scatterlist *sg;
 	unsigned int i, addresses = 0;
@@ -334,7 +334,7 @@ static int rtl_ax_tx_map(struct rtl_ax_tx *tx, struct sk_buff *skb,
 			}
 			for_each_sg(slot->mapping->sg, sg, slot->mapping->dma_count, i)
 				addresses += DIV_ROUND_UP(sg_dma_len(sg), RTL_AX_TX_WP_FRAGMENT_BYTES);
-			if (addresses <= RTL_AX_TX_WP_ADDRESS_MAX - !!(IEEE80211_SKB_CB(skb)->flags & IEEE80211_TX_CTL_HW_80211_ENCAP))
+			if (addresses <= RTL_AX_TX_WP_ADDRESS_MAX - separate_header)
 				return addresses;
 			rtl_ax_tx_unmap(tx, slot);
 		} else
@@ -369,6 +369,7 @@ void rtl_ax_tx_peer_qos(struct rtl_ax_tx *tx, unsigned int macid, bool qos)
 		memset(tx->pe.memory + 0x12000 + macid * 8 * 4, 0, 32);
 		memset(tx->pe.memory + 0xe400 + macid * 8, 0, 8);
 		memset(tx->pe.memory + 0xe800 + macid * 16, 0, 16);
+		memset(tx->pe.memory + 0x14200 + macid * 8, 0, 8);
 		put_unaligned_le32(0, tx->pe.memory + 0xe200 + macid * 4);
 	}
 }
@@ -413,6 +414,8 @@ void rtl_ax_tx_peer_sleep(struct rtl_ax_tx *tx, unsigned int macid, bool asleep)
 	}
 	if (asleep) tx->peer_sleep_events++;
 	else tx->peer_wake_events++;
+	/* mac80211 clears driver-buffered TIDs whenever the peer wakes. */
+	WRITE_ONCE(tx->ni.route_tim[macid], ~0U);
 	ni_route_sleep(tx, macid);
 }
 bool rtl_ax_tx_ni_buffered(struct rtl_ax_tx *tx, unsigned int macid)
@@ -424,7 +427,10 @@ void rtl_ax_tx_ps_release(struct rtl_ax_tx *tx, struct ieee80211_sta *sta,
 	unsigned int macid, u16 tids, bool uapsd, bool more_data)
 {
 	u32 *ps;
-	if (!rtl_ax_tx_ni_buffered(tx, macid)) return;
+	if (!rtl_ax_tx_ni_buffered(tx, macid)) {
+		ieee80211_sta_eosp(sta);
+		return;
+	}
 	ps = tx->pe.memory + 0xe800 + macid * 16;
 	/* One frame ends this service period; the next poll grants a new one. */
 	for (unsigned int tid = 0; tid < 8; tid++)
@@ -453,6 +459,9 @@ int rtl_ax_tx_submit(struct rtl_ax_tx *tx, struct ieee80211_hw *hw,
 	struct rtl_ax_tx_slot slot = {.skb = skb, .bytes = skb->len};
 	bool linearized = false;
 	bool encap = info->flags & IEEE80211_TX_CTL_HW_80211_ENCAP;
+	bool pe_sequence = tx->pe_active && !encap && macid &&
+		ieee80211_is_data_qos(header->frame_control) && ieee80211_is_data_present(header->frame_control) &&
+		!ieee80211_has_morefrags(header->frame_control) && !(le16_to_cpu(header->seq_ctrl) & 15);
 	unsigned int header_bytes = encap ? tx->peer_qos[macid] ? 26 : 24 : ieee80211_hdrlen(header->frame_control);
 	unsigned int packet_bytes = encap ? skb->len + header_bytes + 8 - 14 : skb->len;
 	u8 *page;
@@ -473,7 +482,7 @@ int rtl_ax_tx_submit(struct rtl_ax_tx *tx, struct ieee80211_hw *hw,
 		ring = rtl_ax_tx_dma_channel(tid, 0);
 		qsel = ring;
 	}
-	ret = rtl_ax_tx_map(tx, skb, &slot, &linearized);
+	ret = rtl_ax_tx_map(tx, skb, &slot, &linearized, encap || pe_sequence);
 	if (ret < 0)
 		return ret;
 	addresses = ret;
@@ -501,6 +510,8 @@ int rtl_ax_tx_submit(struct rtl_ax_tx *tx, struct ieee80211_hw *hw,
 			!!(info->flags & IEEE80211_TX_CTL_NO_ACK) << 13 |
 			is_multicast_ether_addr(encap ? skb->data : header->addr1) << 14 | tx->checksum_enabled << 17 | macid << 24 | encap << 18;
 		u32 key = 0; u64 pn = 0;
+		if (pe_sequence)
+			request_flags = (request_flags & ~0xfffU) | tid | BIT(22);
 		if (info->control.hw_key) {
 			key = info->control.hw_key->hw_key_idx << 16 | info->control.hw_key->keyidx << 24;
 			if ((info->control.hw_key->flags & IEEE80211_KEY_FLAG_PAIRWISE) &&
@@ -580,6 +591,7 @@ int rtl_ax_tx_submit(struct rtl_ax_tx *tx, struct ieee80211_hw *hw,
 	rtl_ax_tx_wp_sequence(page + 56, id | (tid_indicators[tid] ? BIT(14) : 0));
 	}
 	slot.ring = ring;
+	slot.pe_sequence = pe_sequence;
 	slot.macid = macid;
 	slot.tid = encap ? tid : ieee80211_is_data_qos(header->frame_control) ? tid : IEEE80211_NUM_TIDS;
 	slot.encrypted = !!info->control.hw_key;
@@ -618,6 +630,7 @@ int rtl_ax_tx_submit(struct rtl_ax_tx *tx, struct ieee80211_hw *hw,
 		ieee80211_stop_queues(hw);
 	}
 	spin_unlock_irqrestore(&tx->lock, flags);
+	if (READ_ONCE(tx->peer_asleep[macid])) ni_route_sleep(tx, macid);
 	if (encap && tx->pe_active && tx->peer_ready && !READ_ONCE(tx->peer_offloaded[macid]))
 		tx->peer_ready(tx->peer_ready_context);
 	return 0;
@@ -658,6 +671,7 @@ int rtl_ax_tx_report(struct rtl_ax_tx *tx, struct ieee80211_hw *hw, const struct
 		unsigned int ring = qsel < 4 ? qsel : qsel == 0x12 ? 4 : qsel == 0x11 ? 5 : RTL_AX_TX_RINGS;
 		struct rtl_ax_tx_slot slot;
 		struct ieee80211_tx_info *info;
+		__le16 completed_sequence = 0;
 		if (packet->pe_completed && id >= 256 && id < RTL_AX_TX_PAGES) {
 			struct ieee80211_sta *sta;
 			unsigned int macid = report & 127;
@@ -712,6 +726,8 @@ int rtl_ax_tx_report(struct rtl_ax_tx *tx, struct ieee80211_hw *hw, const struct
 			continue;
 		}
 		slot = tx->slots[id];
+		if (slot.pe_sequence)
+			completed_sequence = get_unaligned((__le16 *)(tx->headers + id * 128 + 22));
 		tx->slots[id].skb = NULL;
 		__clear_bit(id, tx->pending);
 		tx->occupied--;
@@ -726,8 +742,11 @@ int rtl_ax_tx_report(struct rtl_ax_tx *tx, struct ieee80211_hw *hw, const struct
 			ieee80211_wake_queues(hw);
 		}
 		spin_unlock_irqrestore(&tx->lock, flags);
+		if (READ_ONCE(tx->peer_asleep[slot.macid])) ni_route_sleep(tx, slot.macid);
 		wake_up_all(&tx->key_flush_wait);
 		rtl_ax_tx_unmap(tx, &slot);
+		if (slot.pe_sequence)
+			((struct ieee80211_hdr *)slot.skb->data)->seq_ctrl = completed_sequence;
 		info = IEEE80211_SKB_CB(slot.skb);
 		ieee80211_tx_info_clear_status(info);
 		if ((info->flags & IEEE80211_TX_CTL_HW_80211_ENCAP) &&
@@ -882,10 +901,14 @@ int rtl_ax_tx_status(struct rtl_ax_tx *tx, char *out, size_t capacity)
 	length += scnprintf(out + length, capacity - length,
 		"RPQ_release_config=%08x aggregate_reports=%u timeout_code=%u\n",
 		report_config, report_config & 255, (report_config >> 16) & 255);
-	for (i = 0; i < RTL_AX_TX_RINGS; i++)
-		length += scnprintf(out + length, capacity - length, "DMA_channel=%u submitted=%llu completed=%llu producer=%u hardware=%u\n",
-			rtl_ax_tx_channels[i], tx->submitted_ring[i], tx->completed_ring[i], tx->producer[i],
-			(tx->io->read32(tx->io->ctx, rtl_ax_tx_indices[i]) >> 16) & 0x3ff);
+	for (i = 0; i < RTL_AX_TX_RINGS; i++) {
+		u32 index = tx->io->read32(tx->io->ctx, rtl_ax_tx_indices[i]);
+
+		length += scnprintf(out + length, capacity - length,
+			"DMA_channel=%u submitted=%llu completed=%llu producer=%u hardware=%u ARM_producer=%u\n",
+			rtl_ax_tx_channels[i], tx->submitted_ring[i], tx->completed_ring[i],
+			index & 0x3ff, (index >> 16) & 0x3ff, tx->producer[i]);
+	}
 	length += scnprintf(out + length, capacity - length,
 		"queues_stopped=%u queue_stops=%llu queue_wakes=%llu\n",
 		tx->queues_stopped, tx->queue_stops, tx->queue_wakes);

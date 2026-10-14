@@ -31,10 +31,13 @@ common = r'''
 #include <arpa/inet.h>
 #include <linux/ip.h>
 #include <linux/ipv6.h>
+#include <linux/ppp_defs.h>
+typedef uint8_t u8;typedef uint16_t __be16;
 #define ETH_HLEN 14
 #define VLAN_HLEN 4
 #define ETH_P_IP 0x800
 #define ETH_P_IPV6 0x86dd
+#define ETH_P_PPP_SES 0x8864
 #define CHECKSUM_NONE 0
 #define CHECKSUM_PARTIAL 3
 #define GFP_ATOMIC 0
@@ -67,6 +70,7 @@ static bool skb_is_gso(struct sk_buff *s){return s->gso;}
 static unsigned int skb_mac_header_len(struct sk_buff *s){return s->data-(s->head+s->mac);}
 static struct ethhdr *eth_hdr(struct sk_buff *s){return (void *)(s->head+s->mac);}
 static bool is_multicast_ether_addr(unsigned char *a){return *a&1;}
+static unsigned int get_unaligned_be16(const void *p){unsigned short v;memcpy(&v,p,2);return ntohs(v);}
 static void *skb_header_pointer(struct sk_buff *s,unsigned int off,unsigned int len,void *p){
  (void)p;return off+len<=s->len?s->data+off:NULL;
 }
@@ -146,7 +150,20 @@ int main(void){
  memcpy(tagged+12,"\x88\xa8\x00\x7b\x81\x00\x00\x7c",8);memcpy(tagged+20,frames[0]+12,48);
  skb=new_skb(tagged,68,true);skb->dev=&dev;wifi_receive(&endpoint,skb,true);
  assert(network_seen==22 && frame_length==68 && !memcmp(frame_seen,tagged,68));
- puts("Wi-Fi netdev: captured frames preserved; hit sends full Ethernet; miss resumes once; busy retains caller; VLAN/QinQ headers passed");
+ unsigned char ppp[70]={};memcpy(ppp,frames[0],12);
+ memcpy(ppp+12,"\x88\x64\x11\0\x12\x34\0\x30\0\x21",10);
+ memcpy(ppp+22,frames[0]+14,46);
+ skb=new_skb(ppp,68,false);skb->dev=&dev;
+ assert(wifi_ingress(&port,skb,&state)==NF_STOLEN);
+ assert(frame_length==68 && !memcmp(frame_seen,ppp,68));
+ memset(ppp+22,0,48);ppp[22]=0x60;ppp[28]=17;ppp[19]=50;ppp[21]=0x57;
+ skb=new_skb(ppp,70,false);skb->dev=&dev;
+ assert(wifi_ingress(&port,skb,&state)==NF_STOLEN);
+ assert(frame_length==70 && !memcmp(frame_seen,ppp,70));
+ ppp[20]=0xc0;ppp[21]=0x21;
+ skb=new_skb(ppp,70,false);skb->dev=&dev;
+ assert(wifi_ingress(&port,skb,&state)==NF_ACCEPT);kfree_skb(skb);
+ puts("Wi-Fi netdev: Ethernet/VLAN/QinQ and PPPoE IPv4/IPv6 bytes preserved; LCP stays with Linux");
 }
 '''
 with tempfile.TemporaryDirectory(prefix='wifi-netdev-', dir=root / 'artifacts') as directory:

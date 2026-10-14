@@ -8,8 +8,10 @@
 #include <linux/module.h>
 #include <linux/netfilter.h>
 #include <linux/netfilter_netdev.h>
+#include <linux/ppp_defs.h>
 #include <linux/rtnetlink.h>
 #include <linux/slab.h>
+#include <linux/unaligned.h>
 #include <net/cfg80211.h>
 #include "rtl9617c-ni.h"
 #include <linux/rtl9617c-wifi.h>
@@ -29,6 +31,8 @@ static unsigned int wifi_ingress(void *private, struct sk_buff *skb,
 {
 	struct rtl_wifi_port *port = private;
 	struct sk_buff *copy;
+	__be16 protocol = skb->protocol;
+	unsigned int offset = 0;
 	int ret;
 
 	/* A QM miss starts the same Linux ingress again with its original VIF.
@@ -40,11 +44,21 @@ static unsigned int wifi_ingress(void *private, struct sk_buff *skb,
 	if (!rtl9617c_ni_wifi_enabled(wifi_ni) || skb_is_gso(skb) ||
 	    skb->ip_summed == CHECKSUM_PARTIAL || skb_mac_header_len(skb) != ETH_HLEN ||
 	    is_multicast_ether_addr(eth_hdr(skb)->h_dest)) return NF_ACCEPT;
-	if (skb->protocol == htons(ETH_P_IP)) {
-		struct iphdr header, *ip = skb_header_pointer(skb, 0, sizeof(header), &header);
+	if (protocol == htons(ETH_P_PPP_SES)) {
+		u8 header[8], *pppoe = skb_header_pointer(skb, 0, sizeof(header), header);
+		unsigned int ppp;
+
+		if (!pppoe || pppoe[0] != 0x11 || pppoe[1]) return NF_ACCEPT;
+		ppp = get_unaligned_be16(pppoe + 6);
+		if (ppp != PPP_IP && ppp != PPP_IPV6) return NF_ACCEPT;
+		protocol = htons(ppp == PPP_IP ? ETH_P_IP : ETH_P_IPV6);
+		offset = sizeof(header);
+	}
+	if (protocol == htons(ETH_P_IP)) {
+		struct iphdr header, *ip = skb_header_pointer(skb, offset, sizeof(header), &header);
 		if (!ip || (ip->protocol != IPPROTO_TCP && ip->protocol != IPPROTO_UDP)) return NF_ACCEPT;
-	} else if (skb->protocol == htons(ETH_P_IPV6)) {
-		struct ipv6hdr header, *ip = skb_header_pointer(skb, 0, sizeof(header), &header);
+	} else if (protocol == htons(ETH_P_IPV6)) {
+		struct ipv6hdr header, *ip = skb_header_pointer(skb, offset, sizeof(header), &header);
 		if (!ip || (ip->nexthdr != IPPROTO_TCP && ip->nexthdr != IPPROTO_UDP)) return NF_ACCEPT;
 	} else return NF_ACCEPT;
 	/* eth_type_trans() already retained this header in the skb. Restore the
