@@ -6,9 +6,8 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: Release tag for build output
+        description: Release tag (an existing tag must match the selected commit)
         required: true
-        default: v0.2.0-alpha
       config_file:
         description: Optional repository path to a custom OpenWrt config
         required: false
@@ -27,10 +26,23 @@ jobs:
     timeout-minutes: 360
     env:
       GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ github.sha }}
+          fetch-depth: 0
+      - name: Check release source
+        run: |
+          git check-ref-format "refs/tags/$RELEASE_TAG"
+          if git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"; then
+            tag_commit=$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")
+            build_commit=$(git rev-parse HEAD)
+            if [ "$tag_commit" != "$build_commit" ]; then
+              echo "::error::Release tag $RELEASE_TAG points to $tag_commit, not build commit $build_commit. Choose a new tag or build the tagged commit."
+              exit 1
+            fi
+          fi
       - name: Install build dependencies
         run: |
           sudo apt-get update
@@ -92,11 +104,10 @@ jobs:
             artifacts/build.log
           retention-days: 14
       - name: Publish alpha release
-        env:
-          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
         run: |
           if ! gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+              --target "$(git rev-parse HEAD)" \
               --title "$RELEASE_TAG" --prerelease --draft \
               --notes-file RELEASE_NOTES.md
           fi
