@@ -98,7 +98,8 @@ jobs:
           PY
       - name: Upload installer and sysupgrade firmware
         run: |
-          destination="${BAIDU_UPLOAD_DIR%/}/${RELEASE_TAG#v}"
+          destination="${BAIDU_UPLOAD_DIR%/}/$RELEASE_TAG"
+          "$PCS_BIN" mkdir "$destination"
           "$PCS_BIN" upload -policy overwrite -retry 3 -p 2 -l 1 \
             "$RUNNER_TEMP/baidu-firmware/tyfza1-telnet-install.tar.gz" \
             "$RUNNER_TEMP/baidu-firmware/sysupgrade.bin" "$destination"
