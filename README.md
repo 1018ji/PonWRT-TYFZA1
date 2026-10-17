@@ -253,30 +253,6 @@ SSH 登录 OpenWrt 后执行以下命令。它会根据当前系统槽选择另�
 
 工作流自动获取编译依赖、公共运行时文件和 FIT 签名配置，无需额外设置 Secrets。
 
-#### 自动上传到百度网盘（可选）
-
-在仓库 **Settings → Secrets and variables → Actions** 中配置：
-
-| 类型 | 名称 | 内容 |
-| --- | --- | --- |
-| Secret | `BAIDU_BDUSS` | 目标百度账号的 `BDUSS` Cookie 值 |
-| Secret | `BAIDU_STOKEN` | 同一账号在百度网盘页面的 `STOKEN` Cookie 值，注意不是 `bdstoken` |
-| Variable | `BAIDU_UPLOAD_DIR` | 网盘绝对目录，例如 `/TYFZA1` |
-| Variable | `BAIDU_UPLOAD_ENABLED` | 设为 `true`，开启构建后的自动上传 |
-
-登录目标账号的百度网盘网页版，在浏览器开发者工具中查看 Cookie，分别将两个值直接保存到 GitHub Secrets；不要提交到仓库或粘贴到公开日志。账号由这两个凭证决定，不使用用户名、密码交互登录。
-
-构建并发布 GitHub Release 成功后，独立任务使用固定版本、SHA-256 校验的 [BaiduPCS-Go v4.0.2](https://github.com/qjfoidnh/BaiduPCS-Go/releases/tag/v4.0.2) 上传，仅包含：
-
-```text
-/TYFZA1/v0.6.0-alpha/tyfza1-telnet-install.tar.gz
-/TYFZA1/v0.6.0-alpha/sysupgrade.bin
-```
-
-版本目录与 `release_tag` 一致，保留开头的 `v`。`SHA256SUMS` 只用于上传前校验，不上传网盘。同版本重传会覆盖同名文件。上传失败会使上传任务报错，已经发布的 GitHub Release 仍然保留；可以在 Actions 中选择 **Upload firmware to Baidu Netdisk → Run workflow**，填写已有 `release_tag` 单独补传，无需重新编译。此手动入口不受 `BAIDU_UPLOAD_ENABLED` 开关限制。
-
-凭证失效时更新 Secrets 后补传。未开启开关时，构建流程跳过网盘上传；上传结束后自动清理 runner 上的账号配置。
-
 <details>
 <summary><strong>本地开发与构建</strong></summary>
 

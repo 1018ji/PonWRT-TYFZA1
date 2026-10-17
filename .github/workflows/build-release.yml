@@ -126,15 +126,3 @@ jobs:
           gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease \
             --title "$RELEASE_TAG" \
             --notes-file "$RUNNER_TEMP/release-notes.md"
-
-  baidu-upload:
-    needs: firmware
-    if: ${{ vars.BAIDU_UPLOAD_ENABLED == 'true' }}
-    permissions:
-      contents: read
-    uses: ./.github/workflows/baidu-upload.yml
-    with:
-      release_tag: ${{ inputs.release_tag || github.ref_name }}
-    secrets:
-      BAIDU_BDUSS: ${{ secrets.BAIDU_BDUSS }}
-      BAIDU_STOKEN: ${{ secrets.BAIDU_STOKEN }}
