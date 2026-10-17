@@ -97,6 +97,8 @@ jobs:
               raise SystemExit('::error::Baidu login did not create an active account; update the account secrets.')
           PY
       - name: Upload installer and sysupgrade firmware
+        env:
+          GODEBUG: http2client=0
         run: |
           destination="${BAIDU_UPLOAD_DIR%/}/$RELEASE_TAG"
           "$PCS_BIN" mkdir "$destination"
