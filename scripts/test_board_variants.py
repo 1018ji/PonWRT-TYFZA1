@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare both production board DTs to OEM FDTs and execute FIT strap selection."""
+"""Compare both production board DTs to OEM FDTs and execute OEM FIT selection."""
 import argparse
 import json
 import lzma
@@ -49,9 +49,9 @@ with tempfile.TemporaryDirectory(prefix='board-variants-') as directory:
         assert cells(native['/led-button/lights-toggle']['gpios'])[1:] == [old_button['native_pin'], old_button['flags']]
         ni = native['/soc/ethernet@4f4300000']
         mdio = next(p for n, p in native.items() if p.get('compatible') == b'realtek,rtl9617c-mdio\0')
-        assert 'external-phy-enable-gpios' not in mdio
         assert len(cells(ni['realtek,lan-phys'])) == (4 if board == 1 else 5)
         if board == 0:
+            assert cells(mdio['external-phy-enable-gpios'])[1:] == [14, 0]
             assert cells(mdio['reset-gpios'])[1:] == [128, 1]
             assert cells(mdio['reset-delay-us']) == [30000]
             assert cells(mdio['reset-post-delay-us']) == [300000]
@@ -60,24 +60,12 @@ with tempfile.TemporaryDirectory(prefix='board-variants-') as directory:
             assert cells(phy['reg']) == [7] and 'realtek,hsgmii' in phy
         else:
             assert 'phys' not in ni and 'reset-gpios' not in mdio
+            assert 'external-phy-enable-gpios' not in mdio
         results.append({'strap': board, 'OEM_LED_GPIOs_and_button_match': True,
                         'LAN_ports': len(cells(ni['realtek,lan-phys']))})
 
-    # U-Boot gpio input returns the electrical level as its command status.
-    for strap in range(8):
-        shim = f'''strap={strap}
-unzip_src=0x5000000
-gpio() {{ return $(( (strap >> ($2 - 111)) & 1 )); }}
-setenv() {{ export "$1=$2"; }}
-setexpr() {{ export "$1=$(($2 + $4))"; }}
-bootm() {{ printf '%s\\n' "$1"; }}
-'''
-        result = subprocess.run(['sh'], input=shim + board_boot_command(),
-                                text=True, capture_output=True)
-        if strap in (0, 1):
-            assert result.returncode == 0 and result.stdout.strip() == f'0x5000000#conf-{strap}', result
-        else:
-            assert result.returncode == 1 and 'Unsupported TYFZA1 board strap' in result.stdout
+    subprocess.run([sys.executable, str(root / 'port/tools/test_boot_fit.py'),
+                    'BoardBoot'], check=True)
 
     for filename in ('kernel.lzma', 'fdt.lzma', 'fdt-2p5g.lzma'):
         content = b'kernel-test' if filename == 'kernel.lzma' else (out / ('board0.dtb' if '2p5g' in filename else 'board1.dtb')).read_bytes()
@@ -92,5 +80,5 @@ bootm() {{ printf '%s\\n' "$1"; }}
         selected = fit_images(out / 'image.itb', f'conf-{board}')
         assert selected['fdt'] == (out / f'board{board}.dtb').read_bytes()
 
-print(json.dumps({'boards': results, 'all_eight_strap_values_executed': True,
+print(json.dumps({'boards': results, 'OEM_board_selection_executed': True,
                   'FIT_configurations_match_board_DT': True, 'hardware_test': False}, indent=2))

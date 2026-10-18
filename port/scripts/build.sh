@@ -24,6 +24,11 @@ cp "$PROJECT/artifacts/pe-radio-production/pe-tx-code.h" \
     "$PORT/overlay/target/linux/rtl9617c/files-6.18/drivers/net/wireless/realtek/rtl_ax_ap/pe-tx-code.h"
 sh "$PORT/scripts/sync-overlay.sh" "$TREE"
 sh "$PROJECT/scripts/prepare_luci_feeds.sh" "$TREE"
+for change in "$PORT"/luci-patches/*.patch; do
+    if ! git -C "$TREE/feeds/luci" apply --reverse --check "$change" 2>/dev/null; then
+        git -C "$TREE/feeds/luci" apply "$change"
+    fi
+done
 cd "$TREE"
 REGDB_PATCHED=0
 if ! grep -Fq 'regulatory.db.p7s' package/firmware/wireless-regdb/Makefile; then
@@ -33,10 +38,20 @@ fi
 make defconfig
 for package in luci-app-tyfza1-pon luci-theme-argon luci-i18n-argon-config-zh-cn; do
     grep -qx "CONFIG_PACKAGE_$package=y" .config || {
-        echo "Required ONU UI package missing after defconfig: $package" >&2
+        echo "Required firmware package missing after defconfig: $package" >&2
         exit 1
     }
 done
+while IFS= read -r setting; do
+    case "$setting" in
+        CONFIG_PACKAGE_*=y)
+            grep -qxF "$setting" .config || {
+                echo "Required plugin dependency missing after defconfig: $setting" >&2
+                exit 1
+            }
+            ;;
+    esac
+done < "$PORT/configs/tyfza1-compat.config"
 if [ "$REGDB_PATCHED" = 1 ]; then
     make package/firmware/wireless-regdb/clean
 fi

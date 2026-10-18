@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=tyfza1-pon-control
-PKG_VERSION:=0.7.0_alpha
+PKG_VERSION:=0.8.0_beta
 PKG_RELEASE:=
 PKG_LICENSE:=GPL-2.0-or-later
 
@@ -27,6 +27,7 @@ define Build/Compile
 	cd $(PKG_BUILD_DIR)/omci && RUSTC="$(dir $(TYFZA1_CARGO))rustc" \
 		RUSTFLAGS="-C target-cpu=cortex-a55" $(TYFZA1_CARGO) build --release --locked --target aarch64-unknown-linux-musl
 	$(TARGET_CC) $(TARGET_CPPFLAGS) $(TARGET_CFLAGS) -Wall -Wextra -Werror \
+		-DPON_FIRMWARE_VERSION='"$(PKG_VERSION)"' \
 		$(PKG_BUILD_DIR)/pon-oamd.c $(PKG_BUILD_DIR)/pon-oam.c $(PKG_BUILD_DIR)/pon-backend.c \
 		$(TARGET_LDFLAGS) -luci -o $(PKG_BUILD_DIR)/pon-oamd
 	$(TARGET_CC) $(TARGET_CPPFLAGS) $(TARGET_CFLAGS) -Wall -Wextra -Werror \
