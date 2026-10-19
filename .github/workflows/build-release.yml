@@ -73,6 +73,7 @@ jobs:
         run: |
           python3 scripts/test_lan_probe_isolation.py
           python3 scripts/test_lan_pm_mapping.py
+          python3 scripts/test_lan_link_mode.py
       - name: Verify storage migration
         run: python3 scripts/test_ubi_storage.py
       - name: Obtain locked OpenWrt source
