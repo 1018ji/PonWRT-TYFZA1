@@ -7,6 +7,7 @@
  * This first LAN path retains the PHY setup performed by the stock bootloader.
  */
 #include <linux/bitfield.h>
+#include <linux/completion.h>
 #include <linux/crc32.h>
 #include <linux/delay.h>
 #include <linux/etherdevice.h>
@@ -73,6 +74,10 @@ struct rtl_xram {
 	struct net_device *netdev;
 	struct net_device *ports[5];
 	unsigned int registered_ports;
+	struct work_struct lan4_work;
+	struct completion lan4_ready;
+	struct device *lan4_parent;
+	struct device_node *lan4_phy;
 	void __iomem *ni;
 	void __iomem *xram;
 	struct phy *sgmii;
@@ -160,7 +165,7 @@ static void rtl_mib_work(struct work_struct *work)
 	for (port = 0; port < ARRAY_SIZE(priv->ports); port++) {
 		int ret;
 
-		if (!(priv->registered_ports & BIT(port)))
+		if (!(READ_ONCE(priv->registered_ports) & BIT(port)))
 			continue;
 		ret = rtl9617c_ni_pm_read(priv->netdev->dev.parent, port, counters);
 
@@ -573,6 +578,8 @@ static int rtl_engine_get(struct rtl_xram *priv)
 		priv->engine_users++;
 		return 0;
 	}
+	/* QM ingress and schedulers only cover ports published before the first start. */
+	wait_for_completion(&priv->lan4_ready);
 	ret = rtl_engine_start(priv);
 	if (!ret)
 		priv->engine_users = 1;
@@ -870,7 +877,7 @@ static int rtl_register_lan(struct rtl_xram *priv, struct device *parent,
 	struct phy_device *phydev;
 	struct net_device *dev = NULL;
 	struct rtl_lan *lan;
-	bool sgmii_powered = false;
+	bool sgmii_powered = false, registration_locked = false;
 	u8 mac[ETH_ALEN];
 	int ret;
 
@@ -919,10 +926,18 @@ static int rtl_register_lan(struct rtl_xram *priv, struct device *parent,
 	if (ret)
 		goto put_phy;
 	rcu_assign_pointer(priv->qm.lan[port], dev);
-	ret = register_netdev(dev);
+	/* Publish LAN4 before taking RTNL for registration: an engine start
+	 * waiting on lan4_ready under RTNL must not block this work. */
+	if (port == 4) {
+		complete_all(&priv->lan4_ready);
+		rtnl_lock();
+		registration_locked = true;
+	}
+	/* Synchronous ports are registered under rtl_register_lans()' RTNL. */
+	ret = register_netdevice(dev);
 	if (ret)
 		goto put_phy;
-	priv->registered_ports |= BIT(port);
+	WRITE_ONCE(priv->registered_ports, priv->registered_ports | BIT(port));
 	if (port == 4) {
 		priv->phy_led.output = rtl_phy_led_output;
 		priv->phy_led.requested = 2;
@@ -938,6 +953,8 @@ static int rtl_register_lan(struct rtl_xram *priv, struct device *parent,
 		 dev->name, port, priv->qm_rx ? "native NI/DMA" : "management XRAM",
 		 dev->phydev->phy_id, dev->dev_addr);
 	of_node_put(phy);
+	if (registration_locked)
+		rtnl_unlock();
 	return 0;
 
 put_phy:
@@ -946,7 +963,19 @@ put_phy:
 		rtl_unregister_lan(priv, port);
 	if (sgmii_powered)
 		devm_release_action(parent, rtl_sgmii_power_off, priv->sgmii);
+	if (registration_locked)
+		rtnl_unlock();
 	return ret;
+}
+
+static void rtl_lan4_work(struct work_struct *work)
+{
+	struct rtl_xram *priv = container_of(work, struct rtl_xram, lan4_work);
+	int ret = rtl_register_lan(priv, priv->lan4_parent, 4, priv->lan4_phy);
+
+	if (ret)
+		dev_err(priv->lan4_parent, "LAN4 initialization failed: %d; other ports retained\n", ret);
+	complete_all(&priv->lan4_ready);
 }
 
 static void rtl_register_lans(struct rtl_xram *priv, struct device *parent)
@@ -955,17 +984,33 @@ static void rtl_register_lans(struct rtl_xram *priv, struct device *parent)
 	unsigned int port;
 	int ret;
 
+	/* Do not expose an openable port until all synchronous ports are
+	 * published and LAN4 work is queued (or its completion is signalled). */
+	rtnl_lock();
 	for (port = 0; port < ARRAY_SIZE(priv->ports); port++) {
 		phy = of_parse_phandle(parent->of_node,
 			port == priv->port ? "phy-handle" : "realtek,lan-phys",
 			port == priv->port ? 0 : port);
 		if (!phy)
 			continue;
+		if (port == 4) {
+			/* Like the OEM rtk_rtl8221b_device_init_thread, set up
+			 * the external RTL8221B off the boot path: its HiSGMII
+			 * force-down poll can take the full 100 x 100ms. */
+			priv->lan4_parent = parent;
+			priv->lan4_phy = phy;
+			INIT_WORK(&priv->lan4_work, rtl_lan4_work);
+			schedule_work(&priv->lan4_work);
+			continue;
+		}
 		ret = rtl_register_lan(priv, parent, port, phy);
 		if (ret)
 			dev_err(parent, "LAN%u initialization failed: %d; other ports retained\n",
-				port == 4 ? 4 : port + 1, ret);
+				port + 1, ret);
 	}
+	if (!priv->lan4_phy)
+		complete_all(&priv->lan4_ready);
+	rtnl_unlock();
 }
 
 static ssize_t xram_state_show(struct device *dev, struct device_attribute *attr, char *buf)
@@ -1229,6 +1274,7 @@ static int rtl_probe(struct platform_device *pdev)
 	spin_lock_init(&priv->tx_lock);
 	spin_lock_init(&priv->rx_lock);
 	mutex_init(&priv->mib_lock);
+	init_completion(&priv->lan4_ready);
 	INIT_DELAYED_WORK(&priv->mib_work, rtl_mib_work);
 	netif_napi_add(netdev, &priv->napi, rtl_poll);
 	hrtimer_setup(&priv->timer, rtl_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
@@ -1314,6 +1360,8 @@ static void rtl_remove(struct platform_device *pdev)
 	struct rtl_xram *priv = netdev_priv(dev);
 	unsigned int port;
 
+	if (priv->lan4_phy)
+		flush_work(&priv->lan4_work);
 	cancel_delayed_work_sync(&priv->mib_work);
 	priv->removing = true;
 	if (priv->wifi_started) rtl_wifi_stop();
