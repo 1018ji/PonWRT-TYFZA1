@@ -73,3 +73,21 @@ test "$(wc -l < "$sys/nodes")" = 4
 """
     subprocess.run(['busybox', 'ash', '-c', fixture, 'nodes', str(work)], check=True)
 print('New UBI volumes11..14 receive device nodes before use; existing nodes are reused')
+
+# An erased ubi_apps is archived raw without mounting; a formatted one is still mounted.
+start = source.index('\t# Some units ship an erased ubi_apps')
+end = source.index('\tfor entry in 0:config 10:apps; do', start)
+fixture = """set -eu
+dev="$1/ubi0" work="$1"
+mount() { echo mount >> "$work/events"; }
+umount() { :; }; tar() { :; }; rm() { :; }; import_hashes() { :; }
+""" + source[start:end]
+for content, expected in ((b'\xff' * 126976, ''), (b'\x31\x18\x10\x06' + b'\xff' * 100, 'mount\n')):
+    with tempfile.TemporaryDirectory(prefix='storage-apps-') as temporary:
+        work = Path(temporary)
+        (work / 'capsule').mkdir()
+        (work / 'events').write_text('')
+        (work / 'ubi0_10').write_bytes(content)
+        subprocess.run(['busybox', 'ash', '-c', fixture, 'apps', str(work)], check=True)
+        assert (work / 'events').read_text() == expected
+print('Erased ubi_apps skips the read-only mount; formatted ubi_apps is still mounted')
