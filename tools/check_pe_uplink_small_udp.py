@@ -53,7 +53,7 @@ def case(directory, slot, ipv6, payload_bytes, fe_ready=True):
     get = lambda at: struct.unpack('<I', u.mem_read(at, 4))[0]
     put(0x10002300, (1 << 31 | 1 << 13) if fe_ready else 1 << 31)
     put(0x100038c4, 0xa0000000 if fe_ready else 0)
-    peer, ap, dst = bytes.fromhex('067afb78b287'), bytes.fromhex('02e04c076805'), bytes.fromhex('0050c2010200')
+    peer, ap, dst = bytes.fromhex('02000000004e'), bytes.fromhex('020000000042'), bytes.fromhex('020000000065')
     u.mem_write(mb + 64, ap)
     u.mem_write(base + 0xe410, peer)
     put(base + 0x11a08, 1)

@@ -22,8 +22,8 @@ words[0x380 // 4] |= (mailbox | 0xa0000000) >> 16
 words[0x384 // 4] |= mailbox & 65535
 
 destination = bytes.fromhex('b46e108327cb')
-source = bytes.fromhex('981e896168d0')
-ap = bytes.fromhex('981e896168d2')
+source = bytes.fromhex('020000000001')
+ap = bytes.fromhex('020000000012')
 ethernet = destination + source + b'\x08\x00'
 host_dma = 0x120380be  # Observed bad region; PE ATU redirects this window to IO.
 

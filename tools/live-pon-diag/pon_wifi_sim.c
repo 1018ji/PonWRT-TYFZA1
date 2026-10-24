@@ -39,7 +39,7 @@ static const struct flow_dissector_key keys[]={
  {FLOW_DISSECTOR_KEY_PORTS,offsetof(struct sim_keys,ports)},
  {FLOW_DISSECTOR_KEY_PPPOE,offsetof(struct sim_keys,pppoe)}
 };
-static char *peer_mac="06:7a:fb:78:b2:87",*peer_ip="192.168.1.212";
+static char *peer_mac="02:00:00:00:00:4d",*peer_ip="192.0.2.88";
 static bool tcp;
 module_param(peer_mac,charp,0400);
 module_param(peer_ip,charp,0400);
@@ -107,7 +107,7 @@ static int __init sim_init(void)
  mask.basic.n_proto=htons(0xffff);mask.basic.ip_proto=255;
  key.pppoe.session_id=htons(0x1234);key.pppoe.ppp_proto=htons(PPP_IP);key.pppoe.type=htons(ETH_P_PPP_SES);
  mask.pppoe.session_id=mask.pppoe.ppp_proto=mask.pppoe.type=htons(0xffff);
- key.ipv4.src=htonl(0xc6120001);key.ipv4.dst=tcp?peer_address:htonl(0xc6120002);
+ key.ipv4.src=htonl(0xc612ff01);key.ipv4.dst=tcp?peer_address:htonl(0xc6120002);
  mask.ipv4.src=mask.ipv4.dst=htonl(~0U);
  key.ports.src=htons(tcp?5206:55000);key.ports.dst=htons(tcp?55000:55001);
  mask.ports.src=mask.ports.dst=htons(65535);

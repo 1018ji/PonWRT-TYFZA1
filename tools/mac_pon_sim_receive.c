@@ -42,7 +42,7 @@ int main(int argc, char **argv)
     double duration = argc > 2 ? atof(argv[2]) : 15;
     const char *binding = argc > 3 ? argv[3] :
 #ifdef __APPLE__
-        "192.168.1.212";
+        "192.0.2.88";
 #else
         "0.0.0.0";
 #endif

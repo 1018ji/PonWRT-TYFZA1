@@ -27,7 +27,7 @@ int main(int argc,char **argv) {
  int fd=socket(AF_INET,SOCK_DGRAM,0),iface=if_nametoindex("en0"),buffer=4*1024*1024;
  struct sockaddr_in local={.sin_family=AF_INET,.sin_port=htons(55000)};
  struct sockaddr_in peer={.sin_family=AF_INET,.sin_port=htons(55001)};
- inet_pton(AF_INET,"192.168.1.212",&local.sin_addr);
+ inet_pton(AF_INET,"192.0.2.88",&local.sin_addr);
  inet_pton(AF_INET,"198.19.0.1",&peer.sin_addr);
  if(fd<0||setsockopt(fd,IPPROTO_IP,IP_BOUND_IF,&iface,sizeof(iface))||
     bind(fd,(void *)&local,sizeof(local))) {
