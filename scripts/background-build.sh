@@ -10,7 +10,7 @@ status() {
 import sys,json,datetime,os
 from pathlib import Path
 p=Path('/path/to/user/PonWRT-TYFZA1/logs/background-status.json')
-m={'state':sys.argv[1],'exit_code':int(sys.argv[2]),'updated_at':datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8))).isoformat(),'service':'ponwrt-tyfza1-build','log':'logs/background-build.log','openwrt_commit':'79bc56cb7483bc716da07c369530b792631904b4','kernel':'6.18.55'}
+m={'state':sys.argv[1],'exit_code':int(sys.argv[2]),'updated_at':datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8))).isoformat(),'service':'ponwrt-tyfza1-build','log':'logs/background-build.log','openwrt_commit':'e695009c15c623f4f6a83376b505faaf7a4ae5b5','kernel':'6.18.55'}
 p.with_suffix('.tmp').write_text(json.dumps(m,indent=2)+'\n'); p.with_suffix('.tmp').replace(p)
 STATUS
 }

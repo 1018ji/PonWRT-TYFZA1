@@ -1,11 +1,13 @@
 {
   "schema": 1,
-  "selected_on": "2026-10-07",
+  "selected_on": "2026-10-25",
   "openwrt": {
-    "url": "https://github.com/openwrt/openwrt.git",
-    "ref_observed": "refs/heads/main",
-    "commit": "79bc56cb7483bc716da07c369530b792631904b4",
-    "commit_date": "2026-10-07T14:29:03+02:00",
+    "distribution": "ImmortalWrt",
+    "url": "https://github.com/immortalwrt/immortalwrt.git",
+    "ref_observed": "refs/heads/master",
+    "commit": "e695009c15c623f4f6a83376b505faaf7a4ae5b5",
+    "commit_date": "2026-10-21T16:56:45+08:00",
+    "contains_openwrt_commit": "79bc56cb7483bc716da07c369530b792631904b4",
     "kernel": "6.18.55",
     "kernel_sha256": "f410638061a165c12f42ab871d2f3fcd525515359b5faeee80969cff84524df9"
   },

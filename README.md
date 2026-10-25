@@ -21,7 +21,7 @@
 
 ## 关于项目
 
-PonWRT-TYFZA1 是面向天翼 TYFZA1 光猫的 OpenWrt 适配项目。设备采用 Realtek RTL9617C 四核 Cortex-A55，固件基于 Linux 6.18.55。
+PonWRT-TYFZA1 是面向天翼 TYFZA1 光猫的 OpenWrt 适配项目。设备采用 Realtek RTL9617C 四核 Cortex-A55，固件基于 [ImmortalWrt](https://github.com/immortalwrt/immortalwrt) master 和 Linux 6.18.55。
 
 - **PON 适配**：10G-EPON、XG-PON 线路认证、业务配置和状态管理。
 - **双频无线**：2.4 GHz / 5 GHz、WPA2、Wi-Fi 6 和 160 MHz。
@@ -93,7 +93,7 @@ sysupgrade /tmp/sysupgrade.bin
 
 ## 软件源
 
-固件配置了 OpenWrt 官方 snapshot 软件源、公钥和 HTTPS CA 证书。可在 LuCI 软件包页面安装软件，或在终端执行：
+固件配置了 ImmortalWrt snapshot 软件源（base、luci、packages、routing、telephony）、公钥和 HTTPS CA 证书。可在 LuCI 软件包页面安装软件，或在终端执行：
 
 ```sh
 apk update
@@ -102,7 +102,7 @@ apk add htop nano iperf3
 
 常用插件所需的内核模块和运行库随固件预装，涵盖 VPN、SQM、代理、多 WAN 和流量统计。具体项目见[预装依赖清单](port/configs/tyfza1-compat.config)，软件包架构和安装验证见[兼容说明](port/APK_COMPATIBILITY.md)。
 
-RTL9617C 的 Cortex-A55 可运行官方 `aarch64_cortex-a53` 用户态软件；固件已启用该架构，不限制第三方来源。第三方软件可添加其 APK 软件源，或安装本地 `.apk`，沿用官方 APK 的依赖和签名规则。
+RTL9617C 的 Cortex-A55 可运行 ImmortalWrt 和 OpenWrt 的 `aarch64_cortex-a53` 用户态软件；固件已启用该架构，不限制第三方来源。第三方软件可添加其 APK 软件源，或安装本地 `.apk`，沿用 APK 的依赖和签名规则。
 
 ## 自行编译
 
@@ -173,6 +173,6 @@ UDP 单向丢包率为上行 **12.09%**、下行 **3.12%**，无重复或载荷�
 
 ## 致谢与许可
 
-感谢 [OpenWrt](https://github.com/openwrt/openwrt) 提供系统基础，感谢 [PonWrt](https://github.com/pbs05/ponwrt) 提供 PON 与 OpenWrt 整合、原厂数据保留和硬件转发方面的参考。OMCI 协议引擎基于其 [开源实现](https://github.com/pbs05/openwrt-pon-userspace)，RTL9617C 底层按本机原厂实现独立适配。
+感谢 [OpenWrt](https://github.com/openwrt/openwrt) 和 [ImmortalWrt](https://github.com/immortalwrt/immortalwrt) 提供系统基础，感谢 [PonWrt](https://github.com/pbs05/ponwrt) 提供 PON 与 OpenWrt 整合、原厂数据保留和硬件转发方面的参考。OMCI 协议引擎基于其 [开源实现](https://github.com/pbs05/openwrt-pon-userspace)，RTL9617C 底层按本机原厂实现独立适配。
 
 项目采用 [GNU GPL v2](COPYING) 许可；第三方组件及原厂设备微码遵循各自授权。

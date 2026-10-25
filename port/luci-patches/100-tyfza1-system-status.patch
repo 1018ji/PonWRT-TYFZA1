@@ -1,7 +1,7 @@
 --- a/modules/luci-mod-status/htdocs/luci-static/resources/view/status/include/10_system.js
 +++ b/modules/luci-mod-status/htdocs/luci-static/resources/view/status/include/10_system.js
-@@ -25,6 +25,10 @@
- 	method: 'info'
+@@ -45,6 +45,10 @@ var callTempInfo = rpc.declare({
+ 	method: 'getTempInfo'
  });
  
 +var callHardwareStatus = rpc.declare({
@@ -11,8 +11,8 @@
  return baseclass.extend({
  	title: _('System'),
  
-@@ -34,7 +38,10 @@
- 			L.resolveDefault(callSystemInfo(), {}),
+@@ -58,7 +62,10 @@ return baseclass.extend({
+ 			L.resolveDefault(callTempInfo(), {}),
  			L.resolveDefault(callLuciVersion(), { revision: _('unknown version'), branch: 'LuCI' }),
  			L.resolveDefault(callGetUnixtime(), 0),
 -			uci.load('system')
@@ -23,19 +23,19 @@
  		]);
  	},
  
-@@ -62,11 +69,16 @@
+@@ -90,11 +97,16 @@ return baseclass.extend({
  			}).format(date);
  		}
  
-+		var hardware = data[5];
++		var hardware = data[9];
 +		var temperature = hardware.temperature_error ? '温度读取失败' : hardware.temperature_mC == null ?
 +			'温度未提供' : (hardware.temperature_mC / 1000).toFixed(1) + '°C';
 +		var platform = 'Realtek/RTL9617C（' + temperature + '）';
 +
  		var fields = [
  			_('Hostname'),         boardinfo.hostname,
- 			_('Model'),            boardinfo.model,
- 			_('Architecture'),     boardinfo.system,
+ 			_('Model'),            boardinfo.model + cpubench.cpubench,
+ 			_('Architecture'),     cpuinfo.cpuinfo || boardinfo.system,
 -			_('Target Platform'),  (L.isObject(boardinfo.release) ? boardinfo.release.target : ''),
 +			_('Target Platform'),  platform,
  			_('Firmware Version'), (L.isObject(boardinfo.release) ? boardinfo.release.description + ' / ' : '') + (luciversion || ''),
@@ -45,7 +45,7 @@
 +++ b/modules/luci-mod-status/root/usr/share/rpcd/acl.d/luci-mod-status-index.json
 @@ -11,7 +11,8 @@
  			"ubus": {
- 				"luci": [ "getVersion", "getUnixtime", "getOdhcp6cStats" ],
+ 				"luci": [ "getVersion", "getUnixtime", "getOdhcp6cStats", "getBuiltinEthernetPorts" ],
  				"file": [ "list", "read" ],
 -				"system": [ "board", "info" ]
 +				"system": [ "board", "info" ],

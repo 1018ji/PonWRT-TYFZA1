@@ -40,14 +40,14 @@ with tempfile.TemporaryDirectory(prefix='tyfza1-apk-config-') as directory:
                     '--allow-empty', '-qm', 'fixture'], check=True)
     revision = subprocess.check_output(['git', '-C', str(tree), 'rev-parse', 'HEAD'], text=True).strip()
     sync = port / 'scripts/sync-overlay.sh'
-    sync.write_text(script.replace('PIN=79bc56cb7483bc716da07c369530b792631904b4', 'PIN=' + revision))
+    sync.write_text(script.replace('PIN=e695009c15c623f4f6a83376b505faaf7a4ae5b5', 'PIN=' + revision))
     env = {k: v for k, v in os.environ.items() if k not in
            ('TYFZA1_APK_REPOSITORY', 'GITHUB_REPOSITORY', 'RELEASE_TAG', 'TYFZA1_CONFIG')}
     config = tree / '.config'
     original = 'CONFIG_PACKAGE_keep=y\nCONFIG_VERSION_REPO="https://old.example/build"\n'
     config.write_text(original)
 
-    # Local builds discard stale release URLs and use official feeds alone.
+    # Local builds discard stale release URLs and use ImmortalWrt feeds alone.
     cases = [{}, {'GITHUB_REPOSITORY': 'owner/project', 'RELEASE_TAG': 'v1-local'},
              {'TYFZA1_APK_REPOSITORY': 'https://packages.example/build-002'}]
     for settings in cases:
@@ -56,7 +56,7 @@ with tempfile.TemporaryDirectory(prefix='tyfza1-apk-config-') as directory:
                            check=True, capture_output=True)
             lines = config.read_text().splitlines()
             assert [line for line in lines if line.startswith('CONFIG_VERSION_REPO=')] == [
-                'CONFIG_VERSION_REPO="https://downloads.openwrt.org/snapshots"']
+                'CONFIG_VERSION_REPO="https://downloads.immortalwrt.org/snapshots"']
             assert lines.count('CONFIG_SIGNED_PACKAGES=y') == 1
             assert lines.count('CONFIG_SIGN_EACH_PACKAGE=y') == 1
             assert all(lines.count(setting) == 1 for setting in required)
@@ -68,7 +68,7 @@ with tempfile.TemporaryDirectory(prefix='tyfza1-apk-config-') as directory:
                     'TYFZA1_APK_REPOSITORY': 'https://packages.example/build-003'},
                    check=True, capture_output=True)
     assert 'CONFIG_PACKAGE_custom=y' in config.read_text()
-    assert 'CONFIG_VERSION_REPO="https://downloads.openwrt.org/snapshots"' in config.read_text()
+    assert 'CONFIG_VERSION_REPO="https://downloads.immortalwrt.org/snapshots"' in config.read_text()
     assert 'https://stale.example' in custom.read_text()
 
     # Execute the production make macro; release/custom URLs cannot add a feed.
@@ -77,8 +77,8 @@ with tempfile.TemporaryDirectory(prefix='tyfza1-apk-config-') as directory:
     makefile.write_text('qstrip = $(strip $(subst ",,$(1)))\n' +
         'include ' + str(root / 'port/overlay/target/linux/rtl9617c/base-files.mk') +
         '\nall:\n\t$(call FeedSourcesAppendAPK,' + str(feeds) + ')\n')
-    official = [f'https://downloads.openwrt.org/snapshots/packages/aarch64_cortex-a53/{feed}/packages.adb'
-                for feed in ('base', 'luci', 'packages', 'routing', 'telephony', 'video')]
+    official = [f'https://downloads.immortalwrt.org/snapshots/packages/aarch64_cortex-a53/{feed}/packages.adb'
+                for feed in ('base', 'luci', 'packages', 'routing', 'telephony')]
     for repository in ('', 'https://packages.example/build-004'):
         subprocess.run(['make', '-s', '-f', str(makefile), 'CONFIG_VERSION_REPO="' + repository + '"'],
                        check=True, capture_output=True)
@@ -94,9 +94,9 @@ with tempfile.TemporaryDirectory(prefix='tyfza1-apk-config-') as directory:
     migration.write_text(defaults.read_text().replace('/etc/apk/', str(apk) + '/'))
     assert subprocess.run(['sh', str(migration)]).returncode != 0
     assert (apk / 'arch').read_text() == 'aarch64_cortex-a55\n'
-    (apk / 'keys/openwrt-snapshots.pem').write_text('fixture public key\n')
+    (apk / 'keys/immortalwrt-snapshots.pem').write_text('fixture public key\n')
     for _ in range(2):
         subprocess.run(['sh', str(migration)], check=True)
         assert (apk / 'arch').read_text().splitlines() == ['aarch64_cortex-a55', 'aarch64_cortex-a53']
 
-print('APK: official-only feeds, common plugin dependencies, repeat sync and first-boot A53 compatibility passed')
+print('APK: ImmortalWrt-only feeds, common plugin dependencies, repeat sync and first-boot A53 compatibility passed')

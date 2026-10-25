@@ -1,7 +1,9 @@
 # A53 package compatibility on TYFZA1
 
-The firmware uses only OpenWrt's signed A53 snapshot userspace feeds: base,
-luci, packages, routing, telephony and video. It keeps A55 code generation and
+The firmware uses only ImmortalWrt's signed A53 snapshot userspace feeds:
+base, luci, packages, routing and telephony (ImmortalWrt publishes no video
+feed). The 2026-10-18 measurements below were taken against OpenWrt's feeds
+before the switch to ImmortalWrt and have not been repeated. It keeps A55 code generation and
 the `aarch64_cortex-a55` primary APK architecture, adding
 `aarch64_cortex-a53` as a compatible architecture on first boot and upgrades.
 No alternate target's kernel repository or project package repository is added.
