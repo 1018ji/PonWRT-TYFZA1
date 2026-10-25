@@ -48,6 +48,11 @@ VERSION=$(cat "$PORT/../VERSION")
 sed -i '/^CONFIG_VERSIONOPT=/d; /^# CONFIG_VERSIONOPT is not set$/d; /^CONFIG_VERSION_NUMBER=/d; /^CONFIG_VERSION_REPO=/d; /^CONFIG_SIGNED_PACKAGES=/d; /^# CONFIG_SIGNED_PACKAGES is not set$/d; /^CONFIG_SIGN_EACH_PACKAGE=/d; /^# CONFIG_SIGN_EACH_PACKAGE is not set$/d' "$TREE/.config"
 printf 'CONFIG_VERSIONOPT=y\nCONFIG_VERSION_NUMBER="%s"\n' "$VERSION" >> "$TREE/.config"
 printf 'CONFIG_VERSION_REPO="https://downloads.immortalwrt.org/snapshots"\nCONFIG_SIGNED_PACKAGES=y\nCONFIG_SIGN_EACH_PACKAGE=y\n' >> "$TREE/.config"
+# CI restores a compiler cache between runs; local builds keep their setting.
+if [ "${TYFZA1_CCACHE:-}" = 1 ]; then
+    sed -i '/^CONFIG_DEVEL=/d; /^# CONFIG_DEVEL is not set$/d; /^CONFIG_CCACHE=/d; /^# CONFIG_CCACHE is not set$/d' "$TREE/.config"
+    printf 'CONFIG_DEVEL=y\nCONFIG_CCACHE=y\n' >> "$TREE/.config"
+fi
 # Keep the common plugin dependencies in existing and custom build configs.
 while IFS= read -r setting; do
     case "$setting" in

@@ -89,10 +89,26 @@ jobs:
           rustup toolchain install 1.96.1 --profile minimal
           rustup target add --toolchain 1.96.1 aarch64-unknown-linux-musl
           echo "TYFZA1_CARGO=$(rustup which --toolchain 1.96.1 cargo)" >> "$GITHUB_ENV"
-      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+      # Restore and save separately so failed builds still keep their downloads
+      # and compiler cache for the next attempt.
+      - name: Restore download cache
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: sources/openwrt/dl
-          key: openwrt-downloads-${{ runner.os }}-${{ hashFiles('port/sources.lock.json', 'configs/feeds.conf') }}
+          key: openwrt-downloads-${{ runner.os }}-${{ hashFiles('port/sources.lock.json', 'configs/feeds.conf') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            openwrt-downloads-${{ runner.os }}-${{ hashFiles('port/sources.lock.json', 'configs/feeds.conf') }}-
+            openwrt-downloads-${{ runner.os }}-
+      - name: Restore compiler cache
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: sources/openwrt/.ccache
+          key: openwrt-ccache-${{ runner.os }}-${{ hashFiles('port/sources.lock.json') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            openwrt-ccache-${{ runner.os }}-${{ hashFiles('port/sources.lock.json') }}-
+            openwrt-ccache-${{ runner.os }}-
+      - name: Prepare cache directories
+        run: mkdir -p sources/openwrt/dl sources/openwrt/.ccache
       - name: Obtain common runtime inputs and signing key
         env:
           FIT_SIGNING_KEY: ${{ secrets.TYFZA1_FIT_SIGNING_KEY }}
@@ -113,14 +129,36 @@ jobs:
           openssl req -new -x509 -key artifacts/signing/dev.key \
             -out artifacts/signing/dev.crt -subj /CN=TYFZA1-FIT -days 3650
       - name: Build OpenWrt and native PE
+        id: build
         shell: bash
         env:
           TYFZA1_RUNTIME_INPUTS: ${{ github.workspace }}/artifacts/runtime-inputs
           TYFZA1_SIGNING_KEYS: ${{ github.workspace }}/artifacts/signing
           TYFZA1_CONFIG: ${{ inputs.config_file }}
+          TYFZA1_CCACHE: 1
+          CCACHE_MAXSIZE: 4G
         run: |
           export PATH="/usr/lib/llvm-18/bin:$PATH"
           sh port/scripts/build.sh sources/openwrt "$(nproc)" 2>&1 | tee artifacts/build.log
+      - name: Show compiler cache statistics
+        if: always() && steps.build.outcome != 'skipped'
+        run: |
+          ccache=sources/openwrt/staging_dir/host/bin/ccache
+          if [ -x "$ccache" ]; then
+            CCACHE_DIR=sources/openwrt/.ccache "$ccache" -s
+          fi
+      - name: Save compiler cache
+        if: always() && steps.build.outcome != 'skipped'
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: sources/openwrt/.ccache
+          key: openwrt-ccache-${{ runner.os }}-${{ hashFiles('port/sources.lock.json') }}-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Save download cache
+        if: always() && steps.build.outcome != 'skipped'
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: sources/openwrt/dl
+          key: openwrt-downloads-${{ runner.os }}-${{ hashFiles('port/sources.lock.json', 'configs/feeds.conf') }}-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Verify built board variants
         run: |
           kernel=$(python3 port/tools/project_paths.py --kernel-directory sources/openwrt)
