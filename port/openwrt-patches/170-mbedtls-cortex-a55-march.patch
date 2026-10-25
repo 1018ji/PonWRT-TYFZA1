@@ -1,0 +1,20 @@
+From: TYFZA1 native port
+Subject: [PATCH] mbedtls: build Cortex-A55 crypto code as ARMv8-A
+
+With -mcpu=cortex-a55 and _FORTIFY_SOURCE, GCC 14 cannot inline the
+fortified memset into sha256.c and sha512.c functions carrying the
+"+crypto" target pragma ("target specific option mismatch"). ImmortalWrt
+already passes -march=armv8-a for Cortex-A53; apply it to Cortex-A55 too.
+The crypto instructions remain selected at runtime by CPU detection.
+
+--- a/package/libs/mbedtls/Makefile
++++ b/package/libs/mbedtls/Makefile
+@@ -136,7 +136,7 @@ endef
+ 
+ TARGET_CFLAGS := $(filter-out -O%,$(TARGET_CFLAGS)) \
+ 	-Wno-unterminated-string-initialization \
+-	$(if $(findstring cortex-a53,$(CONFIG_CPU_TYPE)),-march=armv8-a)
++	$(if $(findstring cortex-a53,$(CONFIG_CPU_TYPE))$(findstring cortex-a55,$(CONFIG_CPU_TYPE)),-march=armv8-a)
+ 
+ CMAKE_OPTIONS += \
+ 	-DCMAKE_POSITION_INDEPENDENT_CODE=ON \
