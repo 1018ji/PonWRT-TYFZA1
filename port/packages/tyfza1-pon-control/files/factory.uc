@@ -102,8 +102,13 @@ try {
 		'2:0': 'epon', '2:1': 'epon-d10g', '2:2': 'epon-bi10g'
 	};
 	const mode = modes[family + ':' + speed];
-	if (mode == null) die('Unsupported factory PON mode/speed: ' + family + '/' + speed);
-	identity.mode = mode;
+	// Active Ethernet is valid OEM data, but has no supported PON protocol.
+	if (family == '0')
+		warn('Factory Active Ethernet is not supported; leaving PON mode unset\n');
+	else {
+		if (mode == null) die('Unsupported factory PON mode/speed: ' + family + '/' + speed);
+		identity.mode = mode;
+	}
 } catch (e) {
 	warn('Factory PON mode: ' + e.message + '\n');
 	failed = true;
