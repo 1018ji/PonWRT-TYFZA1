@@ -1,3 +1,13 @@
+## v0.8.2-beta-immortalwrt
+
+基于 v0.8.2-beta，系统底座由 OpenWrt 切换为 ImmortalWrt。测试版，尚未实机验证。
+
+- 底座改为 ImmortalWrt master（e695009，已包含原 OpenWrt 基线 79bc56cb），内核仍为 Linux 6.18.55。
+- packages、luci 软件源改用 ImmortalWrt 对应仓库。
+- 在线软件源改为 ImmortalWrt snapshot（base、luci、packages、routing、telephony）。ImmortalWrt 没有 video 源。
+- DNS 改用 dnsmasq-full，TLS 库随 ImmortalWrt 默认改为 OpenSSL。
+- 镜像文件名前缀变为 immortalwrt-，发布文件名不变。
+
 ## v0.8.2-beta
 
 ### 无线与硬件加速
