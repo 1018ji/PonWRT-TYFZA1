@@ -19,8 +19,9 @@ cp "$PROJECT/port/overlay/target/linux/rtl9617c/base-files/etc/fw_env.config" "$
 
 VERSION=$(python3 "$PROJECT/port/tools/project_paths.py" --field uboot-version)
 SOURCE=$PROJECT/artifacts/release-envtools/u-boot-$VERSION
-mkdir -p "$PROJECT/artifacts/release-envtools"
-tar -xf "$TREE/dl/u-boot-$VERSION.tar.bz2" -C "$PROJECT/artifacts/release-envtools"
+mkdir -p "$SOURCE"
+# The top directory is u-boot-VERSION in older releases, u-boot-vVERSION in newer ones.
+tar -xf "$TREE/dl/u-boot-$VERSION.tar.bz2" --strip-components=1 -C "$SOURCE"
 set -- "$TREE"/staging_dir/toolchain-aarch64_cortex-a55_gcc-*_musl/bin/aarch64-openwrt-linux-musl-gcc
 CC=$1
 STRIP=${CC%gcc}strip
