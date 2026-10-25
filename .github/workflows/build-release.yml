@@ -17,6 +17,12 @@ on:
         type: boolean
         required: false
         default: false
+      cache:
+        description: "Build cache: use (restore and save), read-only (restore only), rebuild (fresh compile, save new cache), off (no cache)"
+        type: choice
+        required: false
+        default: use
+        options: [use, read-only, rebuild, off]
 
 permissions:
   contents: write
@@ -33,6 +39,8 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
       REPLACE_RELEASE: ${{ inputs.replace_release && 'true' || 'false' }}
+      # Tag pushes have no inputs and use the cache normally.
+      CACHE_MODE: ${{ inputs.cache || 'use' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -92,6 +100,7 @@ jobs:
       # Restore and save separately so failed builds still keep their downloads
       # and compiler cache for the next attempt.
       - name: Restore download cache
+        if: env.CACHE_MODE != 'off'
         uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: sources/openwrt/dl
@@ -100,6 +109,7 @@ jobs:
             openwrt-downloads-${{ runner.os }}-${{ hashFiles('port/sources.lock.json', 'configs/feeds.conf') }}-
             openwrt-downloads-${{ runner.os }}-
       - name: Restore compiler cache
+        if: env.CACHE_MODE == 'use' || env.CACHE_MODE == 'read-only'
         uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: sources/openwrt/.ccache
@@ -135,26 +145,26 @@ jobs:
           TYFZA1_RUNTIME_INPUTS: ${{ github.workspace }}/artifacts/runtime-inputs
           TYFZA1_SIGNING_KEYS: ${{ github.workspace }}/artifacts/signing
           TYFZA1_CONFIG: ${{ inputs.config_file }}
-          TYFZA1_CCACHE: 1
+          TYFZA1_CCACHE: ${{ env.CACHE_MODE != 'off' && '1' || '' }}
           CCACHE_MAXSIZE: 4G
         run: |
           export PATH="/usr/lib/llvm-18/bin:$PATH"
           sh port/scripts/build.sh sources/openwrt "$(nproc)" 2>&1 | tee artifacts/build.log
       - name: Show compiler cache statistics
-        if: always() && steps.build.outcome != 'skipped'
+        if: always() && steps.build.outcome != 'skipped' && env.CACHE_MODE != 'off'
         run: |
           ccache=sources/openwrt/staging_dir/host/bin/ccache
           if [ -x "$ccache" ]; then
             CCACHE_DIR=sources/openwrt/.ccache "$ccache" -s
           fi
       - name: Save compiler cache
-        if: always() && steps.build.outcome != 'skipped'
+        if: always() && steps.build.outcome != 'skipped' && (env.CACHE_MODE == 'use' || env.CACHE_MODE == 'rebuild')
         uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: sources/openwrt/.ccache
           key: openwrt-ccache-${{ runner.os }}-${{ hashFiles('port/sources.lock.json') }}-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Save download cache
-        if: always() && steps.build.outcome != 'skipped'
+        if: always() && steps.build.outcome != 'skipped' && (env.CACHE_MODE == 'use' || env.CACHE_MODE == 'rebuild')
         uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: sources/openwrt/dl
