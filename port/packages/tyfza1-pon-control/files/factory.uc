@@ -82,6 +82,10 @@ function import_radio(radio) {
 let failed = false;
 
 function import_identity() {
+if (cs == null || cs == '') {
+	warn('Factory PON configuration: Missing or empty config.xml\n');
+	failed = true;
+}
 const identity = {
 	loid: optional_field(cs, 'LOID'),
 	loid_password: optional_field(cs, 'LOID_PASSWD'),

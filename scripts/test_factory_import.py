@@ -98,6 +98,11 @@ for family, speed in (('3', '1'), ('1', '9'), ('2', '9')):
 result, _, _ = invoke('factory.uc', 'active-ethernet-bad-bosa',
                        dict(fields, PON_MODE='0'), b'bad')
 assert result.returncode != 0 and 'Factory optical:' in result.stderr
+for case, config in (('missing', False), ('empty', '')):
+    result, data, _ = invoke('factory.uc', 'active-ethernet-' + case + '-config',
+                              dict(fields, PON_MODE='0'), valid_bosa, config)
+    assert result.returncode != 0 and data == expected, result.stderr
+    assert 'Factory PON configuration:' in result.stderr
 print('Active Ethernet imports calibration and identity without selecting a PON mode; invalid inputs still fail')
 
 # The 2.5G factory XG-PON configuration has no EPON LLID MAC.
